@@ -46,6 +46,7 @@ from psi4.driver.molutil import *
 # never import driver, wrappers, or aliases into this file
 
 from .roa import *
+from .dboc import *
 from . import proc_util
 from . import empirical_dispersion
 from . import dft
@@ -3021,12 +3022,20 @@ def run_detci(name, **kwargs):
     # Ensure IWL files have been written
     proc_util.check_iwl_file_from_scf_type(core.get_global_option('SCF_TYPE'), ref_wfn)
 
-    ciwfn = core.detci(ref_wfn)
-
     print_nos = False
     if core.get_option("DETCI", "NAT_ORBS"):
         ciwfn.ci_nat_orbs()
         print_nos = True
+    
+    core.print_out(" Computing DBOC Correction \n")
+    core.be_quiet()
+    core.print_out(" I can't see this \n")
+    ans = calc_dboc(ref_wfn)
+    core.reopen_outfile()
+    core.print_out(" Done computing DBOC Correction: {:f} \n".format(ans))
+
+    # This is really dumb
+    ciwfn = core.detci(ref_wfn)
 
     proc_util.print_ci_results(ciwfn, name.upper(), ciwfn.variable("HF TOTAL ENERGY"), core.variable("CURRENT ENERGY"), print_nos)
 
@@ -3045,9 +3054,11 @@ def run_detci(name, **kwargs):
         core.set_variable("CURRENT DIPOLE X", core.variable(name.upper() + " DIPOLE X"))
         core.set_variable("CURRENT DIPOLE Y", core.variable(name.upper() + " DIPOLE Y"))
         core.set_variable("CURRENT DIPOLE Z", core.variable(name.upper() + " DIPOLE Z"))
+    
 
     ciwfn.cleanup_ci()
     ciwfn.cleanup_dpd()
+    print('i made it')
 
     optstash.restore()
     return ciwfn

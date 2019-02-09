@@ -41,6 +41,7 @@
 #include "psi4/detci/slaterd.h"
 #include "psi4/libpsi4util/PsiOutStream.h"
 #include "psi4/libpsi4util/process.h"
+#include <cstring>
 
 #include "psi4/pragma.h"
 PRAGMA_WARNING_PUSH
@@ -50,6 +51,8 @@ PRAGMA_WARNING_POP
 
 namespace psi {
 namespace detci {
+
+std::string orb2lbl(int orbnum, struct calcinfo *Cinfo, int *orbs_per_irr);
 
 CIWavefunction::CIWavefunction(std::shared_ptr<Wavefunction> ref_wfn, Options& options)
     : Wavefunction{ref_wfn, options} {
@@ -668,6 +671,100 @@ void CIWavefunction::print_vector(SharedCIVector vec, int root) {
     free(mi_iaidx);
     free(mi_ibidx);
     free(mi_coeff);
+
+    outfile->Printf("!!! %d blocks total \n\n", vec->num_blocks_);
+   
+    // block number 
+    //
+    vec->read(root, 0);
+    for(int i = 0; i < vec->num_blocks_; ++i) {
+        std::vector<double> my_coeffs;
+        outfile->Printf("!!! On block %d \n", i);
+
+        int iacode = vec->Ia_code_[i];
+        int ibcode = vec->Ib_code_[i];
+
+        for (int j = 0; j < vec->Ia_size_[i]; j++) {
+            for (int k = 0; k < vec->Ib_size_[i]; k++) {
+                my_coeffs.push_back(vec->blocks_[i][j][k]);
+                int iaindex = j;
+                int ibindex = k;
+            }
+        }
+        
+        for(std::size_t j = 0; j < my_coeffs.size(); ++j) 
+            outfile->Printf("!!! %.10f \n", my_coeffs[j]);
+    }
+
+
+}
+
+std::vector<double> CIWavefunction::get_coeffs(SharedCIVector vec, int root, int block) {
+    std::vector<double> my_coeffs;
+    
+    if(block >= vec->num_blocks_)
+        return my_coeffs;
+
+    vec->read(root, 0);
+    outfile->Printf("Getting Coefficients from block %d \n", block);
+
+    for (int j = 0; j < vec->Ia_size_[block]; j++) {
+        for (int k = 0; k < vec->Ib_size_[block]; k++) {
+            my_coeffs.push_back(vec->blocks_[block][j][k]);
+        }
+    }
+    
+    return my_coeffs; 
+}
+
+std::vector<int> CIWavefunction::get_occs(SharedCIVector vec, int root, int block) {
+    std::vector<int> my_occs;
+    
+    if(block >= vec->num_blocks_)
+        return my_occs;
+
+    vec->read(root, 0);
+    outfile->Printf("Getting Occupations from block %d \n", block);
+
+    int iacode = vec->Ia_code_[block];
+    int ibcode = vec->Ib_code_[block];
+
+    int nbf = AlphaG_->num_orb;
+    int num_alp_el = AlphaG_->num_el_expl;
+    int num_bet_el = BetaG_->num_el_expl;
+    int num_drc_orbs = AlphaG_->num_drc_orbs;
+
+    outfile->Printf(" Number of Basis Functions: %d \n", nbf);
+    outfile->Printf(" Number of Alpha Electrons: %d \n", num_alp_el);
+    outfile->Printf(" Number of Beta Electrons: %d \n", num_bet_el);
+    outfile->Printf(" Number of ??? Orbitals: %d \n", num_drc_orbs);
+
+    //// for now, we'll assume that 
+    //for (int j = 0; j < nbf; j++) {
+    //    std::string olabel(orb2lbl(j + num_drc_orbs, CalcInfo_, nmopi_)); /* get label for orbital j */
+    //    outfile->Printf("   J: %d  || Orb ", j);
+    //    outfile->Printf(olabel);
+    //    outfile->Printf("\n");
+    //}
+
+    for (int j = 0; j < vec->Ia_size_[block]; j++) {
+        for (int k = 0; k < vec->Ib_size_[block]; k++) {
+            
+            // Put all alpha occupations in det
+            struct stringwr *stralp = alplist_[iacode] + j;
+            for (int ae = 0; ae < num_alp_el; ae++) {
+                my_occs.push_back((stralp->occs)[ae]);
+            }
+            
+            //Put all beta occupations in det
+            struct stringwr *strbet = betlist_[ibcode] + k;
+            for (int be = 0; be < num_bet_el; be++) {
+                my_occs.push_back((strbet->occs)[be]);
+            }
+        }
+    }
+    
+    return my_occs; 
 }
 
 void CIWavefunction::compute_state_transfer(SharedCIVector ref, int ref_vec, SharedMatrix prop, SharedCIVector ret) {

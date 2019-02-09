@@ -395,7 +395,9 @@ void export_wavefunction(py::module& m) {
         .def("sigma", py_ci_int_sigma, "docstring")
         .def("cleanup_ci", &detci::CIWavefunction::cleanup_ci, "docstring")
         .def("cleanup_dpd", &detci::CIWavefunction::cleanup_dpd, "docstring")
-        .def("set_ci_guess", &detci::CIWavefunction::set_ci_guess, "docstring");
+        .def("set_ci_guess", &detci::CIWavefunction::set_ci_guess, "docstring")
+        .def("get_coeffs", &detci::CIWavefunction::get_coeffs, "Gets the CI coefficients for all determinants of vec stored in a particular block of memory")
+        .def("get_occs", &detci::CIWavefunction::get_occs, "Gets the orbital occupations for all determinants of vec stored in a particular block of memory");
 
     void (detci::CIvect::*py_civ_copy)(std::shared_ptr<psi::detci::CIvect>, int, int) = &detci::CIvect::copy;
     void (detci::CIvect::*py_civ_scale)(double, int) = &detci::CIvect::scale;
