@@ -713,6 +713,16 @@ std::vector<double> CIWavefunction::get_coeffs(SharedCIVector vec, int root, int
             my_coeffs.push_back(vec->blocks_[block][j][k]);
         }
     }
+
+    //if(block == 0){
+    //    printf("C++ First Coefficient: %.20f \n" , my_coeffs[0]);
+    //}
+   
+    //for (int j = 0; j < CalcInfo_->order.size(); j++) {
+    //    printf("%d ", CalcInfo_->order[j]); 
+    //} 
+    //printf("\n");
+    
     
     return my_coeffs; 
 }
@@ -866,6 +876,7 @@ void CIWavefunction::semicanonical_orbs() {
         offset_start += block;
     }
 
+    printf(" this shouldn't be called \n");
     // rotate MOs and push them to the ciwfn
     SharedMatrix Cnew = linalg::doublet(get_orbitals("ROT"), U, false, false);
     set_orbitals("ROT", Cnew);

@@ -30,113 +30,148 @@ from psi4 import driver
 #from psi4.driver import driver
 from psi4.driver.p4util import *
 
+from numpy import linalg
+
 # Necessary conversion factor
 au_to_j = qcel.constants.get('atomic unit of mass')
 amu_to_j = qcel.constants.get('atomic mass constant')
 au_to_amu = au_to_j / amu_to_j
 
-def calc_wfn_overlap(ciwfn_m, S, ciwfn_p):
-    """ calculate the overlap between wfn_m and wfn_p"""    
-    # Assume RHF for now
-    Ca_m = ciwfn_m.Ca().to_array()
-    Ca_p = ciwfn_p.Ca().to_array()
-    mo_overlap = Ca_m.T @ S @ Ca_p
-    #print(mo_overlap)
-    mo_overlap = np.diagonal(mo_overlap)
+
+class CIVect:
     
-    #orbitals = ciwfn_m.get_orbitals("ALL").to_array()
-    #print(Ca_m)
-    #print(orbitals)
-    #print(Ca_m-orbitals)
-    dvec_m = ciwfn_m.D_vector()
-    dvec_p = ciwfn_p.D_vector()
+    def __init__(self, scf_wfn):
+
+        self.scf_wfn = scf_wfn
+
+
+def compare_orbitals(Ca_m, Ca_p):
     
-    na = ciwfn_m.nalpha()
-    nb = ciwfn_m.nbeta()
+    num = abs(Ca_p - Ca_m)
+    num[num < 1.0e-10] = 0.0
+
+    den = (abs(Ca_p) + abs(Ca_m))/2
+
+    norm = num/den
+    norm[num < 1.0e-4] = 0.0
+    
+    np.set_printoptions(suppress=True)
+    print('(+) orbitals: ')
+    print(np.round(Ca_p,3))
+    print('(-) orbitals: ')
+    print(np.round(Ca_m,3))
+    print('The normalized difference between the (+) and (-) orbitals (should be small)')
+    print(np.round(norm,4))
+    np.set_printoptions(suppress=False)
+
+def reorder_rows(S_mo):
+    """
+    S_mo is a MO x MO matrix describing the overlap between the (-) and (+) rows
+    """
+    signs = np.zeros(len(S_mo))
+    order = np.zeros(len(S_mo), dtype=int)
+    for i, row in enumerate(S_mo):
+        ind = np.argmax(abs(row))
+        if row[ind] < 0:
+            signs[ind] = -1
+        else:
+            signs[ind] = 1
+        order[ind] = i
+    return signs, order
+
+    
+
+def read_dets(ciwfn):
 
     block = 0
+    dvec = ciwfn.D_vector()
+    dvec.init_io_files(True)
+    
+    coeffs = []
+    occs = []
+    #read coeffs/occs a block at a time
+    while(True):
 
-    dvec_m.init_io_files(True)
-    block_coeffs_m = np.array(ciwfn_m.get_coeffs(dvec_m,0,block))
-    block_occs_m = np.array(ciwfn_m.get_occs(dvec_m,0,block)).reshape((len(block_coeffs_m),na+nb))
-    dvec_m.close_io_files(True)
+        coeffs_block = ciwfn.get_coeffs(dvec,0,block)
+        occs_block = ciwfn.get_occs(dvec,0,block)
 
-    dvec_p.init_io_files(True)
-    block_coeffs_p = np.array(ciwfn_p.get_coeffs(dvec_p,0,block))
-    block_occs_p = np.array(ciwfn_p.get_occs(dvec_p,0,block)).reshape((len(block_coeffs_p),na+nb))
-    dvec_p.close_io_files(True)
+        if len(coeffs_block) is 0:
+            break
 
-    total_overlap = 0.0
-    coeff_check = 0.0
-
-    while len(block_coeffs_m) > 0:
-
-        #print('MINUS BLOCK {:d} has length {:d} / {:d}'.format(block,len(block_coeffs_m),len(block_occs_m)))
-        #print('PLUS  BLOCK {:d} has length {:d} / {:d}'.format(block,len(block_coeffs_p),len(block_occs_p)))
-        
-        #print(np.amin(block_coeffs_m - block_coeffs_p))
-        #print(np.amax(block_coeffs_m - block_coeffs_p))
-
-        #print(np.amax(block_coeffs_m))
-        #print(np.amax(block_coeffs_p))
-
-        #print(np.amin(block_coeffs_m))
-        #print(np.amin(block_coeffs_p))
+        coeffs.extend(coeffs_block)
+        occs.extend(occs_block)
 
         block += 1
 
-        for det in range(len(block_coeffs_m)):
+    dvec.close_io_files(True)
 
-            det_overlap = block_coeffs_m[det]*block_coeffs_p[det]
-            if abs(det_overlap) < 1.0e-12:
-                continue
-            coeff_check += block_coeffs_m[det]*block_coeffs_p[det]
-            for ei in range(na+nb):
-                orb = block_occs_m[det, ei]
-                det_overlap *= mo_overlap[orb]
-                if orb != block_occs_p[det,ei]:
-                    print('ERROR in det {:d} of block {:d}'.format((det,block-1)))
-                    print('  minus ', block_occs_m[det])
-                    print('  plus ', block_occs_p[det])
-            
-            total_overlap += det_overlap
+    coeffs = np.array(coeffs)
+    occs = np.array(occs).reshape((len(coeffs),ciwfn.nalpha()+ciwfn.nbeta()))
+    
+    #print("Pyt First coefficient: {:.20f}".format(coeffs[0]))
+    return coeffs, occs
+def calc_det(mat):
 
-        dvec_m.init_io_files(True)
-        block_coeffs_m = np.array(ciwfn_m.get_coeffs(dvec_m,0,block))
-        block_occs_m = np.array(ciwfn_m.get_occs(dvec_m,0,block)).reshape((len(block_coeffs_m),na+nb))
-        dvec_m.close_io_files(True)
+    if len(mat) == 1:
+        return mat[0,0]
+    elif len(mat) == 2:
+        return mat[0,0]*mat[1,1]-mat[0,1]*mat[1,0]
 
-        dvec_p.init_io_files(True)
-        block_coeffs_p = np.array(ciwfn_p.get_coeffs(dvec_p,0,block))
-        block_occs_p = np.array(ciwfn_p.get_occs(dvec_p,0,block)).reshape((len(block_coeffs_p),na+nb))
-        dvec_p.close_io_files(True)
+def get_det(S_mo, occ_m, occ_p, na, nb):
 
-    print('checking coefficient normalization: ', coeff_check) 
+    a_m = occ_m[:na]
+    a_p = occ_p[:na]
+    b_m = occ_m[na:]
+    b_p = occ_p[na:]
+
+    a_mat = S_mo[a_m][:,a_p]
+    b_mat = S_mo[b_m][:,b_p]
+
+    a_det = np.linalg.det(a_mat)
+    b_det = np.linalg.det(b_mat)
+    #a_det = calc_det(a_mat)
+    #b_det = calc_det(b_mat)
+
+    total_det = a_det*b_det
+
+    str_m = ' '.join([str(elem) + "a" for elem in a_m] + [str(elem) + "b" for elem in b_m])
+    str_p = ' '.join([str(elem) + "a" for elem in a_p] + [str(elem) + "b" for elem in b_p])
+
+    #print('Calculating determinant between occupations:')
+    #print(' (-) {:s}'.format(str_m))
+    #print(' (+) {:s}'.format(str_p))
+    #print('Alpha orbital submatrix:')
+    #print(a_mat)
+    #print('Beta orbital submatrix:')
+    #print(b_mat)
+    #print('|A|*|B| = {:.10f} * {:.10f} = {:.10f}'.format(a_det,b_det,total_det))
+
+    return total_det
+
+
+def calc_wfn_overlap(coeffs_m, occs_m, S_mo, coeffs_p, occs_p, na, nb):
+    """ calculate the overlap between wfn_m and wfn_p"""    
+
+    ndet = len(coeffs_m)
+
+    S_det = np.zeros((ndet,ndet))
+
+    for im, occ_m in enumerate(occs_m):
+        for ip, occ_p in enumerate(occs_p):
+            S_det[im,ip] = get_det(S_mo, occ_m, occ_p, na, nb)
+
+
+    #print(S_det)
+
+    total_overlap = 0.0
+
+    for im, cm in enumerate(coeffs_m):
+        for ip, cp in enumerate(coeffs_p):
+            total_overlap += cm*S_det[im,ip]*cp
+
     return total_overlap
 
-def calc_wfn_overlap_scf(wfn_m, S, wfn_p):
-    """ calculate the overlap between wfn_m and wfn_p"""    
-    # Assume RHF for now
-    Ca_m = wfn_m.Ca().to_array()
-    Ca_p = wfn_p.Ca().to_array()
-    mo_overlap = Ca_m.T @ S @ Ca_p
-    wfn_overlap = 1.0
-    for e in range(wfn_m.nalpha()):
-        wfn_overlap *= mo_overlap[e,e]
-    return wfn_overlap ** 2
-
 def calc_dboc(wfn):
-    """
-        Main driver for managing Raman Optical activity computations with
-        CC response theory.
-
-        Uses distributed finite differences approach -->
-            1. Sets up a database to keep track of running/finished/waiting
-                computations.
-            2. Generates separate input files for displaced geometries.
-            3. When all displacements are run, collects the necessary information
-                from each displaced computation, and computes final result.
-    """
 
     # Find better ways of ensuring these conditions in the future
     if wfn.name() == 'CIWavefunction':
@@ -160,7 +195,7 @@ def calc_dboc(wfn):
     dR = 5.0e-4
     print("Performing DBOC with dR: ", dR, " Bohr")
 
-    # Define these for conveniece
+    # Define these for convenience
     mol = wfn.molecule()
     geom = mol.geometry()
     init_coords = geom.to_array()
@@ -171,37 +206,111 @@ def calc_dboc(wfn):
     # generate a minus (-) and plus (+) displacement per nuclear coord
     for ai, atom in enumerate(init_coords):
         for dim in range(3):
-            
-            # finite difference minus displacement
+
+            # finite difference for the (-) displacement
             geom_m = np.array(init_coords)
             geom_m[ai,dim] -= dR
             mol.set_geometry(core.Matrix.from_array(geom_m))
+            print('computing (-) displacement for atom {:d} in dimension {:d}:'.format(ai,dim))
+            print(mol.geometry().to_array())
             
-            # get wavefunction AND basis set
+            # Get a CI wavefunction AND the basis / MOs / CI determinants
             e_m, ref_wfn_m = driver.energy('scf',return_wfn=True)
             ciwfn_m = core.detci(ref_wfn_m)
             basis_m = ciwfn_m.basisset()
+            Ca_m = ciwfn_m.Ca().to_array()
+            coeffs_m, occs_m = read_dets(ciwfn_m)
+
+            # Get alpha and beta electron counts (assume RHF for now)
+            na = ciwfn_m.nalpha()
+            nb = ciwfn_m.nbeta()
     
-            # finite difference plus displacement
+            # Finite difference for the (+) displacement
             geom_p = np.array(init_coords)
             geom_p[ai,dim] += dR
             mol.set_geometry(core.Matrix.from_array(geom_p))
+            print('computing (+) displacement for atom {:d} in dimension {:d}:'.format(ai,dim))
+            print(mol.geometry().to_array())
             
-            # get wavefunction AND basis set
-            e_m, ref_wfn_p = driver.energy('scf',return_wfn=True)
+            # Get a CI wavefunction AND the basis / MOs / CI determinants
+            e_p, ref_wfn_p = driver.energy('scf',return_wfn=True)
             ciwfn_p = core.detci(ref_wfn_p)
             basis_p = ciwfn_p.basisset()
+            Ca_p = ciwfn_p.Ca().to_array()
+            coeffs_p, occs_p = read_dets(ciwfn_p)
+
+            # Make sure the reference determinant coefficients are in phase sign-wise
+            if coeffs_m[0] * coeffs_p[0] < 0:
+                coeffs_p = -1 * coeffs_p
+           
+            # Switch to string block order (shouldn't affect anything)
+            #new_order = np.argsort(10*occs_m[:,0]+occs_m[:,1])
+            #occs_m = occs_m[new_order]
+            #coeffs_m = coeffs_m[new_order]
+            #occs_p = occs_p[new_order]
+            #coeffs_p = coeffs_p[new_order]
             
-            # The overlap matrix between Psi_m and Psi_p
-            S_pm = mints.ao_overlap(basis_m,basis_p).to_array()
-            overlap_pm = calc_wfn_overlap(ciwfn_m, S_pm, ciwfn_p)
+            # Print coefficients and occupations
+            #print(np.round(np.hstack((np.array([coeffs_m]).T,occs_m)),3))
+            #print(np.round(np.hstack((np.array([coeffs_p]).T,occs_p)),3))
+            #print(np.hstack((np.array([coeffs_m]).T,np.array([coeffs_p]).T,occs_m)))
+            print('CI coefficients: [ (-), (+), and difference]')
+            np.set_printoptions(suppress=True)
+            print(np.round(np.hstack((np.array([coeffs_m]).T,np.array([coeffs_p]).T,np.array([coeffs_p-coeffs_m]).T)),10))
+            np.set_printoptions(suppress=False)
+
+            # Make sure the orbitals are in the same order
+            for row, orbs_m in enumerate(occs_m):
+                orbs_p = occs_p[row]
+                for col, orb_m in enumerate(orbs_m):
+                    orb_p = orbs_p[col]
+                    if orb_p != orb_m:
+                        print('!!! ERROR in row {:d} of vector !!!'.format(row))
+                        print(orbs_m)
+                        print(orbs_p)
+            if ciwfn_p.nalpha() != na or ciwfn_p.nbeta() != nb:
+                print('!!! ERROR Different numbers of alpha and beta electrons!!!')
+            print('eps')
+            print(ciwfn_m.epsilon_a().to_array())
+            print(ciwfn_p.epsilon_a().to_array())
             
-            print("1-S", 1 - overlap_pm)
-            e_dboc_comp = (1-overlap_pm) / mol.mass(ai) 
+            # See how similar the orbitals are between the two wavefunctions
+            compare_orbitals(Ca_m, Ca_p)
+
+            # Get the overlap (in terms of both AOS and MOS) between (-) and (+)
+            S_ao = mints.ao_overlap(basis_m,basis_p).to_array()
+            S_mo = Ca_m.T @ S_ao @ Ca_p 
+            
+            print('MO Overlap between (-) and (+):')
+            print(np.round(S_mo,3))
+
+            # reorder the MOS to get maximum overlap
+            signs, order = reorder_rows(S_mo)
+            print(signs)
+            print(order)
+
+            #for i, sign in enumerate(signs):
+            #    if sign < 0:
+            #       S_mo[i] = -1*S_mo[i] 
+            #S_mo = S_mo[order]
+            #signs, order = reorder_rows(S_mo)
+            #print(signs)
+            #print(order)
+
+            #print('AO Overlap between (-) and (+):')
+            #print(np.round(S_ao,3))
+            print('MO Overlap between (-) and (+):')
+            print(np.round(S_mo,3))
+
+            overlap_mp = calc_wfn_overlap(coeffs_m, occs_m, S_mo, coeffs_p, occs_p, na, nb)
+            
+            print("1-S", 1 - overlap_mp)
+            e_dboc_comp = (1-overlap_mp) / mol.mass(ai) 
             e_dboc += e_dboc_comp
 
             ciwfn_m.cleanup_ci()
             ciwfn_m.cleanup_dpd()
+
             ciwfn_p.cleanup_ci()
             ciwfn_p.cleanup_dpd()
     
@@ -209,95 +318,8 @@ def calc_dboc(wfn):
     e_dboc *= au_to_amu
 
     print("Total E_DBOC: ", e_dboc, "Eh")
-    print("Total E_DBOC: ", e_dboc*219474.631371, "cm^-1")
+    print("Total E_DBOC: ", e_dboc * 219474.631371, "cm^-1")
 
-    print('Resetting Coordinates to:')
-    print(init_coords)
-    mol.set_geometry(core.Matrix.from_array(init_coords))
-
-    return e_dboc
-
-def calc_dboc_scf(wfn):
-    """
-        Main driver for managing Raman Optical activity computations with
-        CC response theory.
-
-        Uses distributed finite differences approach -->
-            1. Sets up a database to keep track of running/finished/waiting
-                computations.
-            2. Generates separate input files for displaced geometries.
-            3. When all displacements are run, collects the necessary information
-                from each displaced computation, and computes final result.
-    """
-
-    # Find better ways of ensuring these conditions in the future
-    if wfn.name() == 'CIWavefunction':
-        print('Doing CI Calculation')
-    elif wfn.name() in ['RHF, ROHF, UHF']:
-        print('Doing HF Calculation')
-    else:
-        print('Cannot do DBOC for {:s} wavefunction'.format(wfn.name()))
-   
-    if wfn.molecule().units() != 'Bohr':
-        print('Error: Must be in units of Bohr')
-    if not wfn.molecule().schoenflies_symbol() != 'C1':
-        print('Error: Must be in C1 symmetry')
-    if not wfn.molecule().com_fixed():
-        print('Error: COM must be fixed')
-    if not wfn.molecule().orientation_fixed():
-        print('Error: Orientation must be fixed')
-
-    
-    # Finite Difference displacement
-    dR = 5.0e-4
-    print("Performing DBOC with dR: ", dR, " Bohr")
-
-    # Define these for conveniece
-    mol = wfn.molecule()
-    geom = mol.geometry()
-    init_coords = geom.to_array()
-    
-    e_dboc = 0.0
-    mints = core.MintsHelper(wfn)
-    
-    # generate a minus (-) and plus (+) displacement per nuclear coord
-    for ai, atom in enumerate(init_coords):
-        for dim in range(3):
-            
-            # finite difference minus displacement
-            geom_m = np.array(init_coords)
-            geom_m[ai,dim] -= dR
-            mol.set_geometry(core.Matrix.from_array(geom_m))
-            
-            # get wavefunction AND basis set
-            e_m, wfn_m = driver.energy('scf',return_wfn=True)
-            basis_m = wfn_m.basisset()
-    
-            # finite difference plus displacement
-            geom_p = np.array(init_coords)
-            geom_p[ai,dim] += dR
-            mol.set_geometry(core.Matrix.from_array(geom_p))
-            
-            # get wavefunction AND basis set
-            e_p, wfn_p = driver.energy('scf',return_wfn=True)
-            basis_p = wfn_p.basisset()
-            
-            # The overlap matrix between Psi_m and Psi_p
-            S_pm = mints.ao_overlap(basis_m,basis_p).to_array()
-            overlap_pm = calc_wfn_overlap_scf(wfn_m, S_pm, wfn_p)
-            
-            #print("1-S", 1 - overlap_pm)
-            e_dboc_comp = (1-overlap_pm) / mol.mass(ai) 
-            e_dboc += e_dboc_comp
-    
-    e_dboc /= (2*dR)**2
-    e_dboc *= au_to_amu
-
-    print("Total E_DBOC: ", e_dboc, "Eh")
-    print("Total E_DBOC: ", e_dboc*219474.631371, "cm^-1")
-
-    print('Resetting Coordinates to:')
-    print(init_coords)
     mol.set_geometry(core.Matrix.from_array(init_coords))
 
     return e_dboc
