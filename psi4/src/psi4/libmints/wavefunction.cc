@@ -1289,6 +1289,8 @@ SharedMatrix Wavefunction::gradient() const { return gradient_; }
 
 void Wavefunction::set_gradient(SharedMatrix grad) { gradient_ = grad; }
 
+void Wavefunction::set_Ca(SharedMatrix Ca) { Ca_ = Ca; }
+
 SharedMatrix Wavefunction::hessian() const { return hessian_; }
 
 void Wavefunction::set_hessian(SharedMatrix hess) { hessian_ = hess; }

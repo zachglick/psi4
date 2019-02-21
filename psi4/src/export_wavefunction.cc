@@ -137,6 +137,7 @@ void export_wavefunction(py::module& m) {
         .def("set_energy", &Wavefunction::set_energy, "Sets the Wavefunction's energy.")
         .def("gradient", &Wavefunction::gradient, "Returns the Wavefunction's gradient.")
         .def("set_gradient", &Wavefunction::set_gradient, "Sets the Wavefunction's gradient.")
+        .def("set_Ca", &Wavefunction::set_Ca, "Sets the Wavefunction's Orbitals.")
         .def("hessian", &Wavefunction::hessian, "Returns the Wavefunction's Hessian.")
         .def("set_hessian", &Wavefunction::set_hessian, "Sets the Wavefunction's Hessian.")
         .def("legacy_frequencies", &Wavefunction::frequencies, "Returns the frequencies of the Hessian.")

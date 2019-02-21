@@ -672,14 +672,14 @@ void CIWavefunction::print_vector(SharedCIVector vec, int root) {
     free(mi_ibidx);
     free(mi_coeff);
 
-    outfile->Printf("!!! %d blocks total \n\n", vec->num_blocks_);
+    //outfile->Printf("!!! %d blocks total \n\n", vec->num_blocks_);
    
     // block number 
     //
     vec->read(root, 0);
     for(int i = 0; i < vec->num_blocks_; ++i) {
         std::vector<double> my_coeffs;
-        outfile->Printf("!!! On block %d \n", i);
+        //outfile->Printf("!!! On block %d \n", i);
 
         int iacode = vec->Ia_code_[i];
         int ibcode = vec->Ib_code_[i];
@@ -706,7 +706,7 @@ std::vector<double> CIWavefunction::get_coeffs(SharedCIVector vec, int root, int
         return my_coeffs;
 
     vec->read(root, 0);
-    outfile->Printf("Getting Coefficients from block %d \n", block);
+    //outfile->Printf("Getting Coefficients from block %d \n", block);
 
     for (int j = 0; j < vec->Ia_size_[block]; j++) {
         for (int k = 0; k < vec->Ib_size_[block]; k++) {

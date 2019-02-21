@@ -593,6 +593,10 @@ class PSI_API Wavefunction : public std::enable_shared_from_this<Wavefunction> {
     /// Set the gradient for the wavefunction
     void set_gradient(SharedMatrix grad);
 
+
+    /// Set the gradient for the wavefunction
+    void set_Ca(SharedMatrix Ca);
+
     /// Returns the Hessian
     SharedMatrix hessian() const;
     /// Set the Hessian for the wavefunction

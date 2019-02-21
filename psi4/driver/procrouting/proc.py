@@ -1317,6 +1317,7 @@ def scf_helper(name, post_scf=True, **kwargs):
 
     elif (core.get_option('SCF', 'GUESS') == 'READ') and not os.path.isfile(read_filename):
         core.print_out("  Unable to find file 180, defaulting to SAD guess.\n")
+        print("  Unable to find file 180, defaulting to SAD guess.\n")
         core.set_local_option('SCF', 'GUESS', 'SAD')
         sad_basis_list = core.BasisSet.build(scf_wfn.molecule(), "ORBITAL",
                                              core.get_global_option("BASIS"),
