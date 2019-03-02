@@ -342,8 +342,9 @@ SharedMatrix SADGuess::form_D_AO() {
         offset += norbs;
     }
 
-    if (debug_) {
+    if (true) {
         DAO->print();
+        DAO->save("D_SAD", false, false, false);
     }
 
     return DAO;
