@@ -54,8 +54,7 @@ class CIVect:
         self.read_CIDets(0)
         self.ci_wfn.cleanup_ci()
         self.ci_wfn.cleanup_dpd()
-    
-    # read the blocked CI coefficients / alpha-beta occupations from disk
+
     def read_CIDets(self, root):
 
         block = 0
@@ -63,171 +62,168 @@ class CIVect:
         dvec.init_io_files(True)
         
         coeffs = []
-        occs = []
+        str_inds = []
+        occs_a = []
+        occs_b = []
 
         # read coeffs/occs a block at a time
         while(True):
-
+            
+            # the coefficients of each determinant in this block
             coeffs_block = self.ci_wfn.get_coeffs(dvec,root,block)
-            occs_block = self.ci_wfn.get_occs(dvec,root,block)
-
             if len(coeffs_block) is 0:
                 break
 
+            # for each determinant, the alpha and beta string index that describes it
+            str_inds_block = self.ci_wfn.get_string_inds(dvec,root,block)
+
+            # for all alpha and beta strings in this block, the orbital occupations defining the string
+            occs_block = self.ci_wfn.get_string_occs(dvec,root,block)
+            # first two indices give number of alpha strings, number of beta strings
+            nstr_a_block = occs_block[0]
+            nstr_b_block = occs_block[1]
+            # trim the alpha/beta string count off
+            occs_block = occs_block[2:]
+            # each string is read as a 'string index' and na or nb 'orbital indices'
+            len_a_block = nstr_a_block * (self.na + 1)
+            len_b_block = nstr_b_block * (self.nb + 1)
+            assert len(occs_block) == (len_a_block + len_b_block)
+            occs_a_block = occs_block[:len_a_block]
+            occs_b_block = occs_block[len_a_block:]
+
+
             coeffs.extend(coeffs_block)
-            occs.extend(occs_block)
+            str_inds.extend(str_inds_block)
+            occs_a.extend(occs_a_block)
+            occs_b.extend(occs_b_block)
+
             block += 1
 
         dvec.close_io_files(True)
 
         self.ndet = len(coeffs)
-
         self.coeffs = np.array(coeffs)
-        self.occs_a = np.array(occs).reshape( (self.ndet,self.na+self.nb) )[:,:self.na]
-        self.occs_b = np.array(occs).reshape( (self.ndet,self.na+self.nb) )[:,self.na:]
 
+        # some of the strings recorded in occs_a and occs_b may be duplicates
+        # get the max string index, which corresponds to the number of strings
 
+        occs_a = np.array(occs_a).reshape( (int(len(occs_a)/(self.na + 1)), self.na + 1 ) )
+        occs_b = np.array(occs_b).reshape( (int(len(occs_b)/(self.nb + 1)), self.nb + 1 ) )
 
-def compare_orbitals(Ca_m, Ca_p):
+        self.nstr_a = np.max(occs_a[:,0])+1
+        self.nstr_b = np.max(occs_b[:,0])+1
+        
+        self.coeffs = np.zeros((self.nstr_a, self.nstr_b))
+        self.occs_a = np.zeros((self.nstr_a,self.na),dtype=int)
+        self.occs_b = np.zeros((self.nstr_b,self.nb),dtype=int)
+
+        for occ in occs_a:
+            ind = occ[0]
+            self.occs_a[ind] = occ[1:]
+
+        for occ in occs_b:
+            ind = occ[0]
+            self.occs_b[ind] = occ[1:]
+
+        for ind, coeff in enumerate(coeffs):
+            ind_a, ind_b = str_inds[2*ind], str_inds[2*ind+1]
+            self.coeffs[ind_a, ind_b] = coeff
+
+def align_orbs(C_tar, C_ref, S_ao, degens):
+    S_mo = C_tar.T @ S_ao @ C_ref
+    C_tar = C_tar.T
+
+    # make the largest value of each row positive
+    for i in range(len(S_mo)) :
+        if abs(min(S_mo[i])) > max(S_mo[i]):
+            print('  Flipping phase of orbital {}'.format(i))
+            S_mo[i]  = -1*S_mo[i]
+            C_tar[i] = -1*C_tar[i]
+
+    # put the largest values on the diagonals
+    for i in range(len(S_mo)):
+        row = S_mo[i]
+        ind = np.argmax(row)
+        if ind != i:
+            print('  Swapping orbitals {} and {}'.format(i,ind))
+            S_mo[[i, ind]] = S_mo[[ind, i]]
+            C_tar[[i, ind]] = C_tar[[ind, i]]
     
-    num = abs(Ca_p - Ca_m)
-    num[num < 1.0e-10] = 0.0
+    # rotate each degenerate pair of orbitals to max overlap with reference
+    for pair in degens:
+        i, j = pair[0], pair[1]
+        print('  Rotating orbitals {} and {}'.format(i,j))
+        adj = S_mo[i,i] + S_mo[j,j]
+        opp = S_mo[i,j] - S_mo[j,i]
+        hyp = np.sqrt(adj**2 + opp**2)
 
-    den = (abs(Ca_p) + abs(Ca_m))/2
+        cos = adj/hyp
+        sin= opp/hyp
 
-    norm = num/den
-    norm[num < 1.0e-4] = 0.0
-    
-    np.set_printoptions(suppress=True)
-    print('(+) orbitals: ')
-    print(np.round(Ca_p,3))
-    print('(-) orbitals: ')
-    print(np.round(Ca_m,3))
-    print('The normalized difference between the (+) and (-) orbitals (should be small)')
-    print(np.round(norm,4))
-    np.set_printoptions(suppress=False)
+        arr_i = np.array(S_mo[i])
+        arr_j = np.array(S_mo[j])
+        Crow_i = np.array(C_tar[i])
+        Crow_j = np.array(C_tar[j])
 
-def reorder_rows(S_mo):
-    """
-    S_mo is a MO x MO matrix describing the overlap between the (-) and (+) rows
-    """
-    signs = np.zeros(len(S_mo))
-    order = np.zeros(len(S_mo), dtype=int)
-    for i, row in enumerate(S_mo):
-        ind = np.argmax(abs(row))
-        if row[ind] < 0:
-            signs[i] = -1
-        else:
-            signs[i] = 1
-        order[ind] = i
-    return signs, order
+        S_mo[i] = cos*arr_i - sin*arr_j
+        S_mo[j] = cos*arr_j + sin*arr_i
+        C_tar[i] = cos*Crow_i - sin*Crow_j
+        C_tar[j] = cos*Crow_j + sin*Crow_i
+
+    return C_tar.T
 
 def calc_wfn_overlap(vec_m, S_mo, vec_p):
     """ calculate the overlap between wfn_m and wfn_p"""    
 
-    #S_mo = ( S_mo.T + S_mo ) / 2.0
-
-    ndet = vec_m.ndet
-    na = vec_m.na
-    nb = vec_m.nb
-
-    #print('S_mo')
-    #print(S_mo)
-
     # Overlap of the (-) and (+) CI wfns
-    S_det = np.zeros((ndet,ndet))
+    S_a = np.zeros((vec_m.nstr_a, vec_p.nstr_a))
+    for im in range(vec_m.nstr_a):
+        for ip in range(vec_p.nstr_a):
+            occs_m = vec_m.occs_a[im]
+            occs_p = vec_p.occs_a[ip]
+            det = S_mo[occs_m][:,occs_p]
+            S_a[im,ip] = np.linalg.det(det)
 
-    for im in range(ndet):
-        a_m = vec_m.occs_a[im]
-        b_m = vec_m.occs_b[im]
-        for ip in range(ndet):
-            a_p = vec_p.occs_a[ip]
-            b_p = vec_p.occs_b[ip]
-            
-            # Alpha and Beta 'submatrices' of S_det
-            a_mat = S_mo[a_m][:,a_p]
-            b_mat = S_mo[b_m][:,b_p]
+    S_b = np.zeros((vec_m.nstr_b, vec_p.nstr_b))
+    for im in range(vec_m.nstr_b):
+        for ip in range(vec_p.nstr_b):
+            occs_m = vec_m.occs_b[im]
+            occs_p = vec_p.occs_b[ip]
+            det = S_mo[occs_m][:,occs_p]
+            S_b[im,ip] = np.linalg.det(det)
 
-            a_det = np.linalg.det(a_mat)
-            b_det = np.linalg.det(b_mat)
-            S_det[im,ip] = a_det * b_det
+    #total_overlap = 0.0
 
-            #print('Calculating determinant between occupations:')
-            #str_m = ' '.join([str(elem) + "a" for elem in a_m] + [str(elem) + "b" for elem in b_m])
-            #str_p = ' '.join([str(elem) + "a" for elem in a_p] + [str(elem) + "b" for elem in b_p])
-            #print(' (-) {:s}'.format(str_m))
-            #print(' (+) {:s}'.format(str_p))
-            #print('Alpha orbital submatrix:')
-            #print(a_mat)
-            #print('Beta orbital submatrix:')
-            #print(b_mat)
-            #print('|A|*|B| = {:.10f} * {:.10f} = {:.10f}'.format(a_det,b_det,total_det))
+    #for ia in range(vec_m.nstr_a):
+    #    for ib in range(vec_m.nstr_b):
+    #        coeff_i = vec_m.coeffs[ia,ib]
 
-    #print(S_det)
-    #for i in [0,7,11,15]:
-    #to_flip = list(range(19,100)) + [0]
-    #to_flip = list(range(0,19))
-    #print(to_flip)
-    #to_flip = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18]
-    #for i in range(ndet):
-    #    aorb = vec_m.occs_a[i][0]
-    #    borb = vec_m.occs_b[i][0]
-    #    if aorb <= borb:
-    #        S_det[i] = -1*S_det[i]
-    #        S_det[:,i] = -1*S_det[:,i]
-    #print(S_det)
+    #        for ja in range(vec_p.nstr_a):
+    #            for jb in range(vec_p.nstr_b):
+    #                coeff_j = vec_p.coeffs[ja,jb]
 
+    #                s_a = S_a[ia,ja]
+    #                s_b = S_b[ib,jb]
+    #                total_overlap += coeff_i * s_a * s_b * coeff_j
 
+    mat_mb_pa_1 = vec_m.coeffs.T @ S_a
+    mat_mb_pa_2 = S_b @ vec_m.coeffs.T
 
-    #S_sign = np.zeros((ndet,ndet), dtype=int)
-    #C_sign = np.zeros((ndet,ndet), dtype=int)
-    #CSC_sign = np.zeros((ndet,ndet), dtype=int)
+    debug_mat(mat_mb_pa_1)
+    debug_mat(mat_mb_pa_2)
 
-    #for im in range(ndet):
-    #    for ip in range(ndet):
-    #        
-    #        THRESH = 1.0e-15
+    mat = np.multiply(mat_mb_pa_1,mat_mb_pa_2)
+    return np.sum(mat)
 
-    #        if abs(S_det[im,ip]) < THRESH:
-    #            continue
-    #        elif S_det[im,ip] < 0.0:
-    #            S_sign[im,ip] = -1
-    #        else:
-    #            S_sign[im,ip] = 1
-    #        
-    #        CC = vec_m.coeffs[im] * vec_p.coeffs[ip]
+def debug_mat(mat):
+    with open('DEBUG','a+') as f:
+        f.write(np.array_str(np.round(mat,10), max_line_width=1000000, precision=5, suppress_small=False))
+        f.write('\n')
 
-    #        if abs(CC) < THRESH:
-    #            continue
-    #        elif CC < 0.0:
-    #            C_sign[im,ip] = -1
-    #        else:
-    #            C_sign[im,ip] = 1
-
-
-    #        CSC_sign[im,ip] = S_sign[im,ip]*C_sign[im,ip]
-    #print(S_sign)
-    #print(C_sign)
-    #print(CSC_sign)
-
-    total_overlap = 0.0
-
-    #print('S_det')
-    #print(S_det)
-    for im, cm in enumerate(vec_m.coeffs):
-        for ip, cp in enumerate(vec_p.coeffs):
-            S_det[im,ip] = cm*S_det[im,ip]*cp
-            total_overlap += S_det[im,ip]
-
-    #print('CS_detC')
-    #S_det = ( S_det.T + S_det ) / 2.0
-    #S_det[abs(S_det) < 10e-15] = 0.0
-    #np.set_printoptions(precision=0)
-    #print(S_det)
-    #np.set_printoptions(precision=8)
-
-
-    return total_overlap
+def debug_str(string):
+    with open('DEBUG','a+') as f:
+        f.write(string)
+        f.write('\n')
 
 def calc_dboc(wfn):
 
@@ -243,9 +239,20 @@ def calc_dboc(wfn):
     if not wfn.molecule().orientation_fixed():
         raise Exception('Orientation must be fixed')
     
+    # perform SCF at the original geometry
+    # save the location of the orbitals, we'll need to maintain them
+    e_c, ref_wfn_c = driver.energy('scf',return_wfn=True)
+    C_c = ref_wfn_c.Ca().to_array()
+    psi_scratch = core.IOManager.shared_object().get_default_path()
+    fname = os.path.split(os.path.abspath(core.get_writer_file_prefix(wfn.molecule().name())))[1]
+    fname = os.path.join(psi_scratch, fname + ".180.npy")
+
     # Finite Difference displacement
     dR = 5.0e-4
     print("Performing DBOC with dR: ", dR, " a.u.")
+
+    with open('DEBUG','w+') as f:
+        f.write("Performing DBOC with dR: {:f}  a.u.\n".format(dR))
 
     # Define these for convenience
     mints = core.MintsHelper(wfn)
@@ -262,87 +269,82 @@ def calc_dboc(wfn):
 
         for dim in range(3):
             
-            print("displacement {:d} of {:d}".format(3*ai+dim+1,3*len(init_geom)))
+            debug_str("\n\n\n~~~~~~~~~~~~~~~~~~~~coordinate {:d} of {:d}~~~~~~~~~~~~~~~~~~~~\n".format(3*ai+dim+1,3*len(init_geom)))
+            print("\n\ncoordinate {:d} of {:d}\n".format(3*ai+dim+1,3*len(init_geom)))
 
-            # finite difference for the (-) displacement
+            # Create the (-) displacement and get SCF orbitals
             geom_m = np.array(init_geom)
             geom_m[ai,dim] -= dR
             mol.set_geometry(core.Matrix.from_array(geom_m))
-           
-            # make a CIVect
+            ref_wfn_c.to_file(fname)
             e_m, ref_wfn_m = driver.energy('scf',return_wfn=True)
-            vec_m = CIVect(ref_wfn_m)
-    
+            C_m = ref_wfn_m.Ca().to_array()
 
-            # Finite difference for the (+) displacement
+            # Create the (+) displacement and get SCF orbitals
             geom_p = np.array(init_geom)
             geom_p[ai,dim] += dR
             mol.set_geometry(core.Matrix.from_array(geom_p))
-            
-            # make a CIVect
+            ref_wfn_c.to_file(fname)
             e_p, ref_wfn_p = driver.energy('scf',return_wfn=True)
+            C_p = ref_wfn_p.Ca().to_array()
+
+            # Get the overlap (in both AO and MO space) between (-) and (+) orbitals
+            S_ao_mp = mints.ao_overlap(ref_wfn_m.basisset(),ref_wfn_p.basisset())
+            S_ao_mc = mints.ao_overlap(ref_wfn_m.basisset(),ref_wfn_c.basisset())
+            S_ao_pc = mints.ao_overlap(ref_wfn_p.basisset(),ref_wfn_c.basisset())
+            
+            # look at orbital energies to check for degeneracies
+            eps_m = ref_wfn_m.epsilon_a().to_array()
+            eps_p = ref_wfn_p.epsilon_a().to_array()
+            degens = []
+            for i in range(len(eps_m)-1):
+                if abs(eps_m[i] - eps_m[i+1]) > 1.0e-4 :
+                    continue
+                elif abs(eps_p[i] - eps_p[i+1]) > 1.0e-4 :
+                    continue
+                degens.append((i,i+1,))
+
+
+            S_mo = C_m.T @ S_ao_mp.np @ C_p 
+
+            #debug_str('\nMO Overlap between (-) and (+):\n')
+            #debug_mat(S_mo)
+            #debug_str('\nDiagonal:\n')
+            #debug_mat(S_mo.diagonal())
+            print('Aligning (-)')
+            C_m = align_orbs(C_m, C_c, S_ao_mc, degens)
+            print('Aligning (+)')
+            C_p = align_orbs(C_p, C_c, S_ao_pc, degens)
+
+            ref_wfn_m.set_Ca(core.Matrix.from_array(C_m))
+            ref_wfn_p.set_Ca(core.Matrix.from_array(C_p))
+
+            # make a CIVect
+            vec_m = CIVect(ref_wfn_m)
             vec_p = CIVect(ref_wfn_p)
 
-
-            # Get the overlap (in both AO and MO space) between (-) and (+)
-            S_ao = mints.ao_overlap(vec_m.basis,vec_p.basis).to_array()
-            S_mo = vec_m.Ca.T @ S_ao @ vec_p.Ca 
-            
-            #print('AO Overlap between (-) and (+):')
-            #print(np.round(S_ao,7))
-            #print('MO Overlap between (-) and (+):')
-            #print(np.round(S_mo,7))
-
-            ## reorder the MOS of (-) to get maximum overlap
-            #signs, order = reorder_rows(S_mo)
-            #print('before')
-            #print('signs ' + str(signs))
-            #print('order' + str(order))
-
-            #for i, sign in enumerate(signs):
-            #    if sign < 0:
-            #        vec_m.Ca[:,i] = -1*vec_m.Ca[:,i] 
-            #vec_m.Ca = vec_m.Ca.T[order].T
-
-            #ref_wfn_m.set_Ca(core.Matrix.from_array(vec_m.Ca))
-            #vec_m = CIVect(ref_wfn_m)
-
-            #S_mo = vec_m.Ca.T @ S_ao @ vec_p.Ca 
-
-            #signs, order = reorder_rows(S_mo)
-            #print('after')
-            #print('signs ' + str(signs))
-            #print('order' + str(order))
-
             # Make sure the reference determinant coefficients are in phase sign-wise
-            if vec_m.coeffs[0] * vec_p.coeffs[0] < 0:
-                print('Reversed the (-) CI coefficients')
+            if vec_m.coeffs[0,0] * vec_p.coeffs[0,0] < 0:
+                #print('Reversed the (-) CI coefficients')
                 vec_m.coeffs = -1 * vec_m.coeffs
 
             # Make sure the CI determinants are in the same order
             if not ( np.array_equal(vec_m.occs_a,vec_p.occs_a) and np.array_equal(vec_m.occs_b,vec_p.occs_b) ):
                 raise Exception("CI Determinants in different order")
             
-            print('CI Coefficients of (-) and (+)')
-            print(np.hstack((np.array([vec_m.coeffs]).T,np.array([vec_p.coeffs]).T,vec_m.occs_a,vec_m.occs_b)))
+            S_mo = C_m.T @ S_ao_mp.np @ C_p 
+
+            #debug_str('\nRotated MO Overlap between (-) and (+):\n')
+            #debug_mat(S_mo)
+            #debug_str('\nRotated Diagonal:\n')
+            #debug_mat(S_mo.diagonal())
+            #print(np.round(S_mo.diagonal(),3))
 
             overlap_mp = calc_wfn_overlap(vec_m, S_mo, vec_p)
             
             print("1 - <(+)|(-)>", 1 - overlap_mp )
             e_dboc_comp = (1-overlap_mp) / mass_nuc
             e_dboc += e_dboc_comp
-
-            # See how similar the orbitals are between the two wavefunctions
-            #compare_orbitals(vec_m.Ca, vec_p.Ca)
-
-            # Print coefficients and occupations
-            #print(np.round(np.hstack((np.array([coeffs_m]).T,occs_m)),3))
-            #print(np.round(np.hstack((np.array([coeffs_p]).T,occs_p)),3))
-
-            #print('CI coefficients: [ (-), (+), and difference]')
-            #np.set_printoptions(suppress=True)
-            #print(np.round(np.hstack((np.array([coeffs_m]).T,np.array([coeffs_p]).T,np.array([coeffs_p-coeffs_m]).T)),10))
-            #np.set_printoptions(suppress=False)
     
     e_dboc /= (2*dR)**2
     e_dboc *= au_to_amu

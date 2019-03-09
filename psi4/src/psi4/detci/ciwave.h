@@ -237,6 +237,8 @@ class CIWavefunction : public Wavefunction {
     void print_vector(SharedCIVector vec, int root);
     std::vector<double>  get_coeffs(SharedCIVector vec, int root, int block);
     std::vector<int>  get_occs(SharedCIVector vec, int root, int block);
+    std::vector<int> get_string_inds(SharedCIVector vec, int root, int block);
+    std::vector<int> get_string_occs(SharedCIVector vec, int root, int block);
 
     /**
      * Compute the state-transfer operator. Currently in construction and not to be used.
