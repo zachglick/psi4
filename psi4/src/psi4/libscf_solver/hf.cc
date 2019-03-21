@@ -3,7 +3,7 @@
  *
  * Psi4: an open-source quantum chemistry software package
  *
- * Copyright (c) 2007-2018 The Psi4 Developers.
+ * Copyright (c) 2007-2019 The Psi4 Developers.
  *
  * The copyrights for code used from other parties are included in
  * the corresponding files.
@@ -121,8 +121,9 @@ void HF::common_init() {
     if (options_["DOCC"].has_changed()) {
         input_docc_ = true;
         // Map the symmetry of the input DOCC, to account for displacements
-        std::shared_ptr<PointGroup> old_pg = Process::environment.parent_symmetry();
-        if (old_pg) {
+        auto ps = options_.get_str("PARENT_SYMMETRY");
+        if (ps != "") {
+            auto old_pg = std::make_shared<PointGroup> (ps);
             // This is one of a series of displacements;  check the dimension against the parent
             // point group
             size_t full_nirreps = old_pg->char_table().nirrep();
@@ -147,8 +148,9 @@ void HF::common_init() {
     if (options_["SOCC"].has_changed()) {
         input_socc_ = true;
         // Map the symmetry of the input SOCC, to account for displacements
-        std::shared_ptr<PointGroup> old_pg = Process::environment.parent_symmetry();
-        if (old_pg) {
+        auto ps = options_.get_str("PARENT_SYMMETRY");
+        if (ps != "") {
+            auto old_pg = std::make_shared<PointGroup> (ps);
             // This is one of a series of displacements;  check the dimension against the parent
             // point group
             size_t full_nirreps = old_pg->char_table().nirrep();
@@ -1081,6 +1083,26 @@ void HF::guess() {
         // SAD doesn't yield orbitals so also the SCF logic is
         // slightly different for the first iteration.
         sad_ = true;
+        guess_E = compute_initial_E();
+
+    } else if (guess_type == "HUCKEL") {
+        if (print_) outfile->Printf("  SCF Guess: Huckel guess via on-the-fly atomic UHF (doi:10.1021/acs.jctc.8b01089).\n\n");
+
+        // Huckel guess, written by Susi Lehtola 2019-01-27.  See "An
+        // assessment of initial guesses for self-consistent field
+        // calculations. Superposition of Atomic Potentials: simple
+        // yet efficient", JCTC 2019, doi: 10.1021/acs.jctc.8b01089.
+
+        if (!options_.get_bool("SAD_SPIN_AVERAGE")) {
+            throw PSIEXCEPTION("  Huckel guess requires SAD_SPIN_AVERAGE = True!");
+        }
+        if (!options_.get_bool("SAD_FRAC_OCC")) {
+            throw PSIEXCEPTION("  Huckel guess requires SAD_FRAC_OCC = True!");
+        }
+        compute_huckel_guess();
+
+        form_initial_C();
+        form_D();
         guess_E = compute_initial_E();
 
     } else if (guess_type == "GWH") {

@@ -3,7 +3,7 @@
  *
  * Psi4: an open-source quantum chemistry software package
  *
- * Copyright (c) 2007-2018 The Psi4 Developers.
+ * Copyright (c) 2007-2019 The Psi4 Developers.
  *
  * The copyrights for code used from other parties are included in
  * the corresponding files.
@@ -171,6 +171,14 @@ double CoupledCluster::compute_energy() {
         Process::environment.globals["MP2 TOTAL ENERGY"] = emp2 + escf;
         Process::environment.globals["CURRENT ENERGY"] = emp2 + escf;
         Process::environment.globals["CURRENT CORRELATION ENERGY"] = emp2;
+
+        energy_ = emp2 + escf;
+        set_scalar_variable("MP2 OPPOSITE-SPIN CORRELATION ENERGY", emp2_os);
+        set_scalar_variable("MP2 SAME-SPIN CORRELATION ENERGY", emp2_ss);
+        set_scalar_variable("MP2 CORRELATION ENERGY", emp2);
+        set_scalar_variable("MP2 TOTAL ENERGY", emp2 + escf);
+        set_scalar_variable("CURRENT ENERGY", emp2 + escf);
+        set_scalar_variable("CURRENT CORRELATION ENERGY", emp2);
         tstop();
         return emp2 + escf;
     }

@@ -1,4 +1,4 @@
-find_package(Libxc 4.0.2 CONFIG QUIET)
+find_package(Libxc 4.3.0 CONFIG QUIET)
 
 if(${Libxc_FOUND})
     get_property(_loc TARGET Libxc::xc PROPERTY LOCATION)
@@ -12,16 +12,14 @@ else()
     include(ExternalProject)
     message(STATUS "Suitable Libxc could not be located, ${Magenta}Building Libxc${ColourReset} instead.")
     ExternalProject_Add(libxc_external
-        GIT_REPOSITORY https://github.com/psi4/libxc
-        GIT_TAG a5eb119 # v4.0 (0387b1d1) + !62 + MVS corr + 4.0.2 bump + 2 build commits + (Win port )
-        UPDATE_COMMAND ""
+        URL http://www.tddft.org/programs/octopus/down.php?file=libxc/4.3.4/libxc-4.3.4.tar.gz
         CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${STAGED_INSTALL_PREFIX}
                    -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
                    -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
                    -DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
                    -DCMAKE_INSTALL_BINDIR=${CMAKE_INSTALL_BINDIR}
                    -DCMAKE_INSTALL_INCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}
-                   -DNAMESPACE_INSTALL_INCLUDEDIR=/libxc
+                   -DNAMESPACE_INSTALL_INCLUDEDIR=/
                    -DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}
                    # OpenMP irrelevant
                    -DENABLE_XHOST=${ENABLE_XHOST}

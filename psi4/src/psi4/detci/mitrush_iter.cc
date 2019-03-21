@@ -3,7 +3,7 @@
  *
  * Psi4: an open-source quantum chemistry software package
  *
- * Copyright (c) 2007-2018 The Psi4 Developers.
+ * Copyright (c) 2007-2019 The Psi4 Developers.
  *
  * The copyrights for code used from other parties are included in
  * the corresponding files.
@@ -311,7 +311,7 @@ void CIWavefunction::mitrush_iter(CIvect &Hd, struct stringwr **alplist, struct 
 
     outfile->Printf("Iter  0  ROOT 1 ECI = %14.9lf", enuc + E);
     outfile->Printf("    Delta_E %10.3E   Delta_C %10.3E\n", E - E_last, c1norm);
-    Process::environment.globals["DETCI AVG DVEC NORM"] = c1norm;
+    set_scalar_variable("DETCI AVG DVEC NORM", c1norm);
 
     iter = 1;
     if (Parameters_->diag_method == METHOD_MITRUSHENKOV) {

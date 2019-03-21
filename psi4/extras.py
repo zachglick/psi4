@@ -3,7 +3,7 @@
 #
 # Psi4: an open-source quantum chemistry software package
 #
-# Copyright (c) 2007-2018 The Psi4 Developers.
+# Copyright (c) 2007-2019 The Psi4 Developers.
 #
 # The copyrights for code used from other parties are included in
 # the corresponding files.
@@ -36,6 +36,7 @@ from . import core
 # Numpy place holder for files and cleanup
 numpy_files = []
 def register_numpy_file(filename):
+    if not filename.endswith('.npy'): filename += '.npy'
     if filename not in numpy_files:
         numpy_files.append(filename)
 

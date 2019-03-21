@@ -3,7 +3,7 @@
 #
 # Psi4: an open-source quantum chemistry software package
 #
-# Copyright (c) 2007-2018 The Psi4 Developers.
+# Copyright (c) 2007-2019 The Psi4 Developers.
 #
 # The copyrights for code used from other parties are included in
 # the corresponding files.
@@ -29,18 +29,21 @@
 Runs a JSON input psi file.
 """
 
-import atexit
+import os
+import sys
 import copy
 import json
-import numpy as np
-import os
 import uuid
+import atexit
+import traceback
+
+import numpy as np
 
 import psi4
-from psi4.driver import driver
 from psi4.driver import molutil
 from psi4.driver import p4util
 from psi4 import core
+from psi4.driver import driver
 
 ## Methods and properties blocks
 
@@ -206,8 +209,13 @@ def run_json(json_data, clean=True):
         json_data = run_json_qc_schema(copy.deepcopy(json_data), clean)
 
     except Exception as error:
-        json_data["error"] = repr(error)
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        json_data["error"] = repr(traceback.format_exception(exc_type, exc_value,
+                                          exc_traceback))
         json_data["success"] = False
+
+        with open(outfile, 'r') as f:
+            json_data["raw_output"] = f.read()
 
     if return_output:
         with open(outfile, 'r') as f:
@@ -241,7 +249,9 @@ def run_json_qc_schema(json_data, clean):
     _clean_psi_environ(clean)
 
     # This is currently a forced override
-    if json_data["schema_name"] != "qc_schema_input":
+    if json_data["schema_name"] in ["qc_schema_input", "qcschema_input"]:
+        json_data["schema_name"] = "qc_schema_input"  # humor qcel 0.1.3
+    else:
         raise KeyError("Schema name of '{}' not understood".format(json_data["schema_name"]))
 
     if json_data["schema_version"] != 1:
@@ -330,6 +340,6 @@ def run_json_qc_schema(json_data, clean):
     # Reset state
     _clean_psi_environ(clean)
 
-    json_data["schema_name"] = "qc_schema_output"
+    json_data["schema_name"] = "qcschema_output"
 
     return json_data

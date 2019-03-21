@@ -3,7 +3,7 @@
 #
 # Psi4: an open-source quantum chemistry software package
 #
-# Copyright (c) 2007-2018 The Psi4 Developers.
+# Copyright (c) 2007-2019 The Psi4 Developers.
 #
 # The copyrights for code used from other parties are included in
 # the corresponding files.
@@ -34,6 +34,7 @@ properties, and vibrational frequency calculations.
 import os
 import re
 import sys
+import copy
 import json
 import shutil
 
@@ -58,7 +59,9 @@ def _find_derivative_type(ptype, method_name, user_dertype):
     a given method.
     """
 
-    if ptype not in ['gradient', 'hessian']:
+    derivatives = {"gradient": 1, "hessian": 2}
+
+    if ptype not in derivatives:
         raise ValidationError("_find_derivative_type: ptype must either be gradient or hessian.")
 
     dertype = "(auto)"
@@ -105,6 +108,8 @@ def _find_derivative_type(ptype, method_name, user_dertype):
 
         raise ValidationError("""Derivative method 'name' %s and derivative level 'dertype' %s are not available.%s"""
                               % (method_name, str(dertype), alternatives))
+
+    dertype = min(dertype, derivatives[ptype])
 
     return dertype
 
@@ -674,6 +679,9 @@ def gradient(name, **kwargs):
     return_wfn = kwargs.pop('return_wfn', False)
     core.clean_variables()
 
+    if isinstance(lowername, str) and lowername.replace('-', '') == 'mp2d':
+        raise ValidationError('MP2D gradients (even findif) not available.')
+
     # no analytic derivatives for scf_type cd
     if core.get_global_option('SCF_TYPE') == 'CD':
         if (dertype == 1):
@@ -701,7 +709,7 @@ def gradient(name, **kwargs):
             print('Performing finite difference calculations')
 
         # Obtain list of displacements
-        findif_meta_dict = driver_findif.gradient_from_energy_geometries(molecule)
+        findif_meta_dict = driver_findif.gradient_from_energies_geometries(molecule)
         ndisp = len(findif_meta_dict["displacements"]) + 1
 
         print(""" %d displacements needed ...""" % (ndisp), end='')
@@ -720,13 +728,14 @@ def gradient(name, **kwargs):
 
         # Compute the gradient
         core.set_local_option('FINDIF', 'GRADIENT_WRITE', True)
-        G = driver_findif.compute_gradient_from_energies(findif_meta_dict)
+        G = driver_findif.assemble_gradient_from_energies(findif_meta_dict)
         grad_psi_matrix = core.Matrix.from_array(G)
         grad_psi_matrix.print_out()
         wfn.set_gradient(grad_psi_matrix)
 
         # Explicitly set the current energy..
         core.set_variable('CURRENT ENERGY', findif_meta_dict["reference"]["energy"])
+        wfn.set_variable('CURRENT ENERGY', findif_meta_dict["reference"]["energy"])
 
     optstash.restore()
 
@@ -1076,7 +1085,7 @@ def optimize(name, **kwargs):
             G = core.get_legacy_gradient()  # TODO
             core.IOManager.shared_object().set_specific_retention(1, True)
             core.IOManager.shared_object().set_specific_path(1, './')
-            frequencies(hessian_with_method, molecule=moleculeclone, **kwargs)
+            frequencies(hessian_with_method, molecule=moleculeclone, ref_gradient = G, **kwargs)
             steps_since_last_hessian = 0
             core.set_legacy_gradient(G)
             core.set_global_option('CART_HESS_READ', True)
@@ -1229,7 +1238,7 @@ def hessian(name, **kwargs):
     if level:
         kwargs['level'] = level
 
-    dertype = _find_derivative_type('hessian', lowername, kwargs.pop('freq_dertype', kwargs.pop('dertype', None)))
+    dertype = _find_derivative_type('hessian', lowername, kwargs.pop('freq_dertype', kwargs.get('dertype', None)))
 
     # Make sure the molecule the user provided is the active one
     molecule = kwargs.pop('molecule', core.get_active_molecule())
@@ -1276,16 +1285,17 @@ def hessian(name, **kwargs):
 
         # TODO: check that current energy's being set to the right figure when this code is actually used
         core.set_variable('CURRENT ENERGY', wfn.energy())
+        wfn.set_variable('CURRENT ENERGY', wfn.energy())
 
     elif dertype == 1:
         core.print_out(
             """hessian() will perform frequency computation by finite difference of analytic gradients.\n""")
 
         # Obtain list of displacements
-        findif_meta_dict = driver_findif.hessian_from_gradient_geometries(molecule, irrep)
+        findif_meta_dict = driver_findif.hessian_from_gradients_geometries(molecule, irrep)
 
         # Record undisplaced symmetry for projection of displaced point groups
-        core.set_parent_symmetry(molecule.schoenflies_symbol())
+        core.set_global_option("PARENT_SYMMETRY", molecule.schoenflies_symbol())
 
         ndisp = len(findif_meta_dict["displacements"]) + 1
 
@@ -1305,7 +1315,7 @@ def hessian(name, **kwargs):
 
         # Assemble Hessian from gradients
         #   Final disp is undisp, so wfn has mol, G, H general to freq calc
-        H = driver_findif.compute_hessian_from_gradients(findif_meta_dict, irrep)
+        H = driver_findif.assemble_hessian_from_gradients(findif_meta_dict, irrep)
         wfn.set_hessian(core.Matrix.from_array(H))
         wfn.set_gradient(G0)
 
@@ -1313,7 +1323,7 @@ def hessian(name, **kwargs):
         core.set_variable('CURRENT ENERGY', findif_meta_dict["reference"]["energy"])
         wfn.set_variable('CURRENT ENERGY', findif_meta_dict["reference"]["energy"])
 
-        core.set_parent_symmetry('')
+        core.set_global_option("PARENT_SYMMETRY", "")
         optstash.restore()
         optstash_conv.restore()
 
@@ -1326,10 +1336,10 @@ def hessian(name, **kwargs):
         optstash_conv = driver_util._set_convergence_criterion('energy', lowername, 10, 11, 10, 11, 10)
 
         # Obtain list of displacements
-        findif_meta_dict = driver_findif.hessian_from_energy_geometries(molecule, irrep)
+        findif_meta_dict = driver_findif.hessian_from_energies_geometries(molecule, irrep)
 
         # Record undisplaced symmetry for projection of diplaced point groups
-        core.set_parent_symmetry(molecule.schoenflies_symbol())
+        core.set_global_option("PARENT_SYMMETRY", molecule.schoenflies_symbol())
 
         ndisp = len(findif_meta_dict["displacements"]) + 1
 
@@ -1348,7 +1358,7 @@ def hessian(name, **kwargs):
             core.set_variable(key, val)
 
         # Assemble Hessian from energies
-        H = driver_findif.compute_hessian_from_energies(findif_meta_dict, irrep)
+        H = driver_findif.assemble_hessian_from_energies(findif_meta_dict, irrep)
         wfn.set_hessian(core.Matrix.from_array(H))
         wfn.set_gradient(G0)
 
@@ -1356,7 +1366,7 @@ def hessian(name, **kwargs):
         core.set_variable('CURRENT ENERGY', findif_meta_dict["reference"]["energy"])
         wfn.set_variable('CURRENT ENERGY', findif_meta_dict["reference"]["energy"])
 
-        core.set_parent_symmetry('')
+        core.set_global_option("PARENT_SYMMETRY", "")
         optstash.restore()
         optstash_conv.restore()
 
@@ -1638,8 +1648,9 @@ def gdma(wfn, datafile=""):
     if datafile:
         commands = datafile
     else:
-        densname = wfn.name()
-        if densname == "DFT":
+        if wfn.reference_wavefunction():
+            densname = "CC"
+        else:
             densname = "SCF"
         commands = 'psi4_dma_datafile.dma'
         radii = core.get_option('GDMA', 'GDMA_RADIUS')
@@ -1681,6 +1692,12 @@ def fchk(wfn, filename):
 
     :type wfn: :py:class:`~psi4.core.Wavefunction`
     :param wfn: set of molecule, basis, orbitals from which to generate fchk file
+
+    Notes
+    -----
+    * A description of the FCHK format is http://wild.life.nctu.edu.tw/~jsyu/compchem/g09/g09ur/f_formchk.htm
+    * The allowed headers for methods are general and limited, i.e., "Total SCF|MP2|CI|CC Density",
+      so "CC" is always used for the post-HF case.
 
     :examples:
 
@@ -1738,7 +1755,8 @@ def molden(wfn, filename=None, density_a=None, density_b=None, dovirtual=None):
     >>> # [4] This WILL work, note the transformation of Da (SO->MO)
     >>> E, wfn = properties('ccsd', properties=['dipole'], return_wfn=True)
     >>> Da_so = wfn.Da()
-    >>> Da_mo = core.triplet(wfn.Ca(), Da_so, wfn.Ca(), True, False, False)
+    >>> SCa = core.doublet(wfn.S(), wfn.Ca(), False, False)
+    >>> Da_mo = core.triplet(SCa, Da_so, SCa, True, False, False)
     >>> molden(wfn, 'ccsd_no.molden', density_a=Da_mo)
 
     """
