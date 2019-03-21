@@ -417,6 +417,15 @@ def harvest_outfile_pass(outtext):
         psivar['(T) CORRECTION ENERGY'] = mobj.group('tcorr')
         psivar['[T] CORRECTION ENERGY'] = mobj.group('bkttcorr')
         psivar['CCSD(T) TOTAL ENERGY'] = mobj.group('ttot')
+    
+    #Process DBOC
+    mobj = re.search(
+            r'^\s*' + r'(?:The total diagonal Born-Oppenheimer correction \(DBOC\) is:)\s+' +
+            r'(?P<dboc>' + NUMBER + ')' + r'\s*a.u.\s*',
+        outtext, re.MULTILINE | re.DOTALL)
+    if mobj:
+        print('matched dboc ecc')
+        psivar['CCSD DBOC ENERGY'] = mobj.group('dboc')
 
     # Process SCS-CC
     mobj = re.search(
@@ -961,6 +970,12 @@ def muster_modelchem(name, dertype):
         options['CFOUR']['CFOUR_CALC_LEVEL']['value'] = 'CCSDTQ'
         options['CFOUR']['CFOUR_CC_PROGRAM']['value'] = 'NCC'
 
+    elif lowername == 'c4-ccsd-dboc':
+        options['CFOUR']['CFOUR_CALC_LEVEL']['value'] = 'CCSD'
+        options['CFOUR']['CFOUR_CC_PROGRAM']['value'] = 'ECC'
+        options['CFOUR']['CFOUR_DERIV_LEVEL']['value'] = 'ONE'
+        options['CFOUR']['CFOUR_DBOC']['value'] = 'ON'
+
     else:
         raise ValidationError("""Requested Cfour computational methods %d is not available.""" % (lowername))
 
@@ -997,6 +1012,7 @@ def cfour_list():
     val.append('c4-ccsdt')
     val.append('c4-ccsdt(q)')
     val.append('c4-ccsdtq')
+    val.append('c4-ccsd-dboc')
     return val
 
 
