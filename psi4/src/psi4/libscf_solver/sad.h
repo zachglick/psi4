@@ -72,6 +72,7 @@ class SADGuess {
     virtual ~SADGuess();
 
     void compute_guess();
+    void update_D(SharedMatrix& D_new);
 
     SharedMatrix Da() const { return Da_; }
     SharedMatrix Db() const { return Db_; }

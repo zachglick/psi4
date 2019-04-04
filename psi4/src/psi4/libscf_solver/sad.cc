@@ -125,6 +125,14 @@ void SADGuess::form_C() {
         Cb_->print();
     }
 }
+void SADGuess::update_D(SharedMatrix& D_new) {
+    //D_new->apply_symmetry(D_new, AO2SO_);
+    Da_ = D_new;
+    Db_ = Da_;
+    Ca_ = Da_->partial_cholesky_factorize(options_.get_double("SAD_CHOL_TOLERANCE"));
+    Ca_->set_name("Ca SAD");
+    Cb_ = Ca_;
+}
 void SADGuess::run_atomic_calculations(SharedMatrix& DAO, SharedMatrix& HuckelC, SharedVector& HuckelE) {
     if (print_ > 6) {
         for (int A = 0; A < molecule_->natom(); A++) {
@@ -374,7 +382,7 @@ void SADGuess::run_atomic_calculations(SharedMatrix& DAO, SharedMatrix& HuckelC,
         offset += nbf;
     }
 
-    if (true) {
+    if (debug_) {
         DAO->print();
         DAO->save("D_SAD", false, false, false);
         HuckelC->print();
@@ -759,6 +767,56 @@ void HF::compute_SAD_guess() {
     }
 
     guess->compute_guess();
+
+    SharedMatrix Ca_sad = guess->Ca();
+    SharedMatrix Cb_sad = guess->Cb();
+    Da_->copy(guess->Da());
+    Db_->copy(guess->Db());
+    Dimension sad_dim(Da_->nirrep(), "SAD Dimensions");
+
+    for (int h = 0; h < Da_->nirrep(); h++) {
+        int nso = Ca_sad->rowspi()[h];
+        int nmo = Ca_sad->colspi()[h];
+        if (nmo > X_->colspi()[h]) nmo = X_->colspi()[h];
+
+        sad_dim[h] = nmo;
+
+        if (!nso || !nmo) continue;
+
+        double** Cap = Ca_->pointer(h);
+        double** Cbp = Cb_->pointer(h);
+        double** Ca2p = Ca_sad->pointer(h);
+        double** Cb2p = Cb_sad->pointer(h);
+
+        for (int i = 0; i < nso; i++) {
+            ::memcpy((void*)Cap[i], (void*)Ca2p[i], nmo * sizeof(double));
+            ::memcpy((void*)Cbp[i], (void*)Cb2p[i], nmo * sizeof(double));
+        }
+    }
+
+    nalphapi_ = sad_dim;
+    nbetapi_ = sad_dim;
+    nalpha_ = sad_dim.sum();
+    nbeta_ = sad_dim.sum();
+    doccpi_ = sad_dim;
+    soccpi_ = Dimension(Da_->nirrep(), "SAD SOCC dim (0's)");
+
+    energies_["Total Energy"] = 0.0;  // This is the -1th iteration
+}
+void HF::read_SAD_guess(SharedMatrix& D_guess) {
+    if (sad_basissets_.empty()) {
+        throw PSIEXCEPTION("  SCF guess was set to SAD, but sad_basissets_ was empty!\n\n");
+    }
+
+    auto guess = std::make_shared<SADGuess>(basisset_, sad_basissets_, options_);
+    if (options_.get_str("SAD_SCF_TYPE") == "DF") {
+        if (sad_fitting_basissets_.empty()) {
+            throw PSIEXCEPTION("  SCF guess was set to SAD with DiskDFJK, but sad_fitting_basissets_ was empty!\n\n");
+        }
+        guess->set_atomic_fit_bases(sad_fitting_basissets_);
+    }
+
+    guess->update_D(D_guess);
 
     SharedMatrix Ca_sad = guess->Ca();
     SharedMatrix Cb_sad = guess->Cb();

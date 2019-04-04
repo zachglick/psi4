@@ -30,6 +30,7 @@
 The SCF iteration functions
 """
 
+import os
 import numpy as np
 
 from psi4.driver import p4util
@@ -220,7 +221,13 @@ def scf_initialize(self):
         core.timer_off("HF: Form S/X")
 
         core.timer_on("HF: Guess")
-        self.guess()
+        if os.path.isfile('D_guess.npy'):
+            core.print_out(" !! Reading Custom Guess from 'D_guess.npy' !!\n\n ")
+            D_guess = np.load("D_guess.npy")
+            D_guess = core.Matrix.from_array(D_guess)
+            self.guess_input(D_guess)
+        else:
+            self.guess()
         core.timer_off("HF: Guess")
 
     else:
@@ -425,6 +432,7 @@ def scf_iterate(self, e_conv=None, d_conv=None):
             status.append("DAMP={}%".format(round(damping_percentage)))
 
         if verbose > 3:
+            core.print_out(" !! In the iterator !! \n\n")
             self.Ca().print_out()
             self.Cb().print_out()
             self.Da().print_out()

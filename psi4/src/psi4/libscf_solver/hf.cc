@@ -1152,6 +1152,15 @@ void HF::guess() {
     energies_["Total Energy"] = 0.0;  // don't use this guess in our convergence checks
 }
 
+void HF::guess_input(SharedMatrix D_guess) {
+    double guess_E;
+    read_SAD_guess(D_guess);
+    iteration_ = -1;
+    sad_ = true;
+    guess_E = compute_initial_E();
+    energies_["Total Energy"] = 0.0;  // don't use this guess in our convergence checks
+}
+
 void HF::format_guess() {
     // Nothing to do, only for special cases
 }

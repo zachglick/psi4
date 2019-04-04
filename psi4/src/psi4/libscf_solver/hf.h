@@ -210,6 +210,8 @@ class HF : public Wavefunction {
     virtual void compute_SAD_guess();
     /// Huckel guess
     virtual void compute_huckel_guess();
+    // Manual update of SAD density
+    virtual void read_SAD_guess(SharedMatrix& D_new);
 
     /** Transformation, diagonalization, and backtransform of Fock matrix */
     virtual void diagonalize_F(const SharedMatrix& F, SharedMatrix& C, std::shared_ptr<Vector>& eps);
@@ -353,6 +355,7 @@ class HF : public Wavefunction {
 
     /// Form the guess (guarantees C, D, and E)
     virtual void guess();
+    virtual void guess_input(SharedMatrix D_guess);
 
     /// Compute the MO coefficients (C_)
     virtual void form_C();
