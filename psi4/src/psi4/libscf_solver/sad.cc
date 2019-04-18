@@ -384,10 +384,10 @@ void SADGuess::run_atomic_calculations(SharedMatrix& DAO, SharedMatrix& HuckelC,
 
     if (debug_) {
         DAO->print();
-        DAO->save("D_SAD", false, false, false);
         HuckelC->print();
         HuckelE->print();
     }
+    DAO->save("D_SAD", false, false, false);
 }
 void SADGuess::get_uhf_atomic_density(std::shared_ptr<BasisSet> bas, std::shared_ptr<BasisSet> fit, SharedVector occ_a,
                                       SharedVector occ_b, SharedMatrix D, SharedMatrix Chuckel, SharedVector Ehuckel) {

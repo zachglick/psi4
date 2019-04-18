@@ -265,6 +265,7 @@ def scf_iterate(self, e_conv=None, d_conv=None):
         core.print_out("  ==> Iterations <==\n\n")
         core.print_out("%s                        Total Energy        Delta E     %s |[F,P]|\n\n" % ("   "
                                                                                                      if is_dfjk else "", "RMS" if diis_rms else "MAX"))
+    ###D_cache = []
 
     # SCF iterations!
     SCFE_old = 0.0
@@ -272,6 +273,8 @@ def scf_iterate(self, e_conv=None, d_conv=None):
     Dnorm = 0.0
     while True:
         self.iteration_ += 1
+
+        ###D_cache.append(self.Da().to_array())
 
         diis_performed = False
         soscf_performed = False
@@ -456,6 +459,9 @@ def scf_iterate(self, e_conv=None, d_conv=None):
         if self.iteration_ >= core.get_option('SCF', 'MAXITER'):
             raise SCFConvergenceError("""SCF iterations""", self.iteration_, self, Ediff, Dnorm)
 
+    ###D_cache.append(self.Da().to_array())
+    ###D_cache = np.array(D_cache)
+    ###np.save('D_cache', D_cache)
 
 def scf_finalize_energy(self):
     """Performs stability analysis and calls back SCF with new guess
