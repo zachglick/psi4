@@ -3619,7 +3619,8 @@ void MolecularGrid::buildGridFromOptions(MolecularGridOptions const &opt) {
     OrientationMgr std_orientation(molecule_);
     RadialPruneMgr prune(opt);
     NuclearWeightMgr nuc(molecule_, opt.nucscheme);
-    double weightcut = opt.weights_cutoff;
+    //double weightcut = opt.weights_cutoff;
+    double weightcut = -10.0;
 
     // RMP: Like, I want to keep this info, yo?
     orientation_ = std_orientation.orientation();
@@ -3701,6 +3702,8 @@ void MolecularGrid::buildGridFromOptions(MolecularGridOptions const &opt) {
     w_ = new double[npoints_];
     index_ = new int[npoints_];
 
+    //std::cout<< "!! DFT grid with " << npoints_ << " points created" << std::endl;
+
     int grid_vector_index = 0;
     for (int i = 0; i < grid.size(); i++) {
         for (int j = 0; j < grid[i].size(); ++j) {
@@ -3708,10 +3711,12 @@ void MolecularGrid::buildGridFromOptions(MolecularGridOptions const &opt) {
             y_[grid_vector_index] = grid[i][j].y;
             z_[grid_vector_index] = grid[i][j].z;
             w_[grid_vector_index] = grid[i][j].w;
-            index_[i] = grid_vector_index;
+            index_[grid_vector_index] = grid_vector_index;
             ++grid_vector_index;
         }
     }
+
+
 }
 
 void MolecularGrid::buildGridFromOptions(MolecularGridOptions const &opt, const std::vector<std::vector<double>> &rs,
@@ -3791,7 +3796,7 @@ void MolecularGrid::buildGridFromOptions(MolecularGridOptions const &opt, const 
             y_[grid_vector_index] = grid[i][j].y;
             z_[grid_vector_index] = grid[i][j].z;
             w_[grid_vector_index] = grid[i][j].w;
-            index_[i] = grid_vector_index;
+            index_[grid_vector_index] = grid_vector_index;
             ++grid_vector_index;
         }
     }
@@ -4268,7 +4273,7 @@ void MolecularGrid::postProcess(std::shared_ptr<BasisExtents> extents, int max_p
     primary_ = extents_->basis();
 
     // => Remove points that are very distant <= //
-    remove_distant_points(extents_->maxR());
+    //remove_distant_points(extents_->maxR());
 
     block(max_points, min_points, max_radius);
 }

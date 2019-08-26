@@ -539,7 +539,7 @@ void UKSFunctions::compute_orbitals(std::shared_ptr<BlockOPoints> block, bool fo
     double** Cb2p = Cb_local_->pointer();
     for (int ml = 0; ml < nlocal; ml++) {
         int mg = function_map[ml];
-        C_DCOPY(na, Cbp[mg], 1, Cb2p[ml], 1);
+        C_DCOPY(nb, Cbp[mg], 1, Cb2p[ml], 1);
     }
 
     // => Build orbitals <= //

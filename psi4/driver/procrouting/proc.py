@@ -3496,6 +3496,8 @@ def run_sapt(name, **kwargs):
     core.set_local_option('SAPT', 'D_CONVERGENCE', 10e-10)
     if name in ['sapt0', 'ssapt0']:
         core.set_local_option('SAPT', 'SAPT_LEVEL', 'SAPT0')
+    if name == 'asapt0':
+        core.set_local_option('SAPT', 'SAPT_LEVEL', 'ASAPT0')
     elif name == 'sapt2':
         core.set_local_option('SAPT', 'SAPT_LEVEL', 'SAPT2')
     elif name in ['sapt2+', 'sapt2+dmp2']:
@@ -3564,6 +3566,34 @@ def run_sapt(name, **kwargs):
     core.set_variable(' '.join(['SAPT', target_ind, 'ENERGY']),
         core.variable(' '.join([name.upper(), which_ind, 'ENERGY'])))
     core.set_variable('CURRENT ENERGY', core.variable('SAPT TOTAL ENERGY'))
+    
+    #print(dimer_wfn.array_variable("Elst_AB" ).np)
+    #print(dimer_wfn.array_variable("Exch_AB" ).np)
+    #print(dimer_wfn.array_variable("IndAB_AB").np)
+    #print(dimer_wfn.array_variable("IndBA_AB").np)
+    #print(dimer_wfn.array_variable("Disp_AB" ).np)
+    #print(dimer_wfn.array_variable("Elst_AB" ).np.shape)
+    #print(dimer_wfn.array_variable("Exch_AB" ).np.shape)
+    #print(dimer_wfn.array_variable("IndAB_AB").np.shape)
+    #print(dimer_wfn.array_variable("IndBA_AB").np.shape)
+    #print(dimer_wfn.array_variable("Disp_AB" ).np.shape)
+
+    E_elst  = np.sum(dimer_wfn.array_variable("Elst_AB" ).np)
+    E_exch  = np.sum(dimer_wfn.array_variable("Exch_AB" ).np)
+    E_indAB = np.sum(dimer_wfn.array_variable("IndAB_AB").np)
+    E_indBA = np.sum(dimer_wfn.array_variable("IndBA_AB").np)
+    E_ind   = E_indAB + E_indBA
+    E_disp  = np.sum(dimer_wfn.array_variable("Disp_AB" ).np)
+    E_tot   = E_elst + E_exch + E_ind + E_disp
+
+    print('Python layer summary info:')
+    print(f'  Electrostatics : {1000.0 *  E_elst:20.12f} [mEh]   {627.509 *  E_elst:20.12f} [kcal * mol^{-1}]  ')
+    print(f'  Exchange       : {1000.0 *  E_exch:20.12f} [mEh]   {627.509 *  E_exch:20.12f} [kcal * mol^{-1}]  ')
+    print(f'  Induction      : {1000.0 *   E_ind:20.12f} [mEh]   {627.509 *   E_ind:20.12f} [kcal * mol^{-1}]  ')
+    print(f'    IndAB        : {1000.0 * E_indAB:20.12f} [mEh]   {627.509 * E_indAB:20.12f} [kcal * mol^{-1}]  ')
+    print(f'    IndBA        : {1000.0 * E_indBA:20.12f} [mEh]   {627.509 * E_indBA:20.12f} [kcal * mol^{-1}]  ')
+    print(f'  Dispersion     : {1000.0 *  E_disp:20.12f} [mEh]   {627.509 *  E_disp:20.12f} [kcal * mol^{-1}]  ')
+    print(f'  Total          : {1000.0 *   E_tot:20.12f} [mEh]   {627.509 *   E_tot:20.12f} [kcal * mol^{-1}]  ')
 
     return dimer_wfn
 

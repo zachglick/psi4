@@ -69,6 +69,7 @@ procedures = {
         'sapt(dft)'     : sapt.run_sapt_dft,
         'sapt0'         : proc.run_sapt,
         'ssapt0'        : proc.run_sapt,
+        'asapt0'        : proc.run_sapt,
         'sapt2'         : proc.run_sapt,
         'sapt2+'        : proc.run_sapt,
         'sapt2+(3)'     : proc.run_sapt,

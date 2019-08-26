@@ -30,6 +30,7 @@
 #include "psi4/libmints/molecule.h"
 
 #include "psi4/libsapt_solver/sapt0.h"
+#include "psi4/libsapt_solver/asapt0.h"
 #include "psi4/libsapt_solver/usapt0.h"
 #include "psi4/libsapt_solver/sapt2.h"
 #include "psi4/libsapt_solver/sapt2p.h"
@@ -81,6 +82,9 @@ PsiReturnType sapt(SharedWavefunction Dimer, SharedWavefunction MonomerA, Shared
             USAPT0 sapt(Dimer, MonomerA, MonomerB, options, psio);
             sapt.compute_energy();
         }
+    } else if (options.get_str("SAPT_LEVEL") == "ASAPT0") {
+        ASAPT0 sapt(Dimer, MonomerA, MonomerB, options, psio);
+        sapt.compute_energy();
     } else if (options.get_str("SAPT_LEVEL") == "SAPT2") {
         SAPT2 sapt(Dimer, MonomerA, MonomerB, options, psio);
         sapt.compute_energy();
