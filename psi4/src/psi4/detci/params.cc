@@ -692,7 +692,7 @@ void CIWavefunction::print_parameters() {
                     Parameters_->nprint);
     outfile->Printf("    NUM ROOTS      =   %6d      ICORE         =   %6d\n", Parameters_->num_roots,
                     Parameters_->icore);
-    outfile->Printf("    PRINT LVL      =   %6d      FCI           =   %6s\n", print_, Parameters_->fci ? "YES" : "NO");
+    outfile->Printf("    PRINT LVL      =   %6lu      FCI           =   %6s\n", print_, Parameters_->fci ? "YES" : "NO");
     outfile->Printf("    R CONV         = %6.2e      MIXED         =   %6s\n", Parameters_->convergence,
                     Parameters_->mixed ? "YES" : "NO");
     outfile->Printf("    E CONV         = %6.2e      MIXED4        =   %6s\n", Parameters_->energy_convergence,
@@ -950,9 +950,10 @@ void CIWavefunction::set_ras_parameters() {
         }
         if (j > 0) nras2alp += j;
         if (j > CalcInfo_->ras_opi[1][i]) {
-            outfile->Printf("(set_ras_parms): detecting %d electrons ", j - CalcInfo_->ras_opi[1][i]);
+            outfile->Printf("(set_ras_parms): detecting %d alpha electrons ", j - CalcInfo_->ras_opi[1][i]);
             outfile->Printf("in RAS III for irrep %d.\n", i);
             outfile->Printf("Some parts of DETCI assume all elec in I and II\n");
+            throw PSIEXCEPTION("DETCI: electrons detected outside of active space.\n");
         }
     }
     /* beta electrons */
@@ -968,9 +969,10 @@ void CIWavefunction::set_ras_parameters() {
         }
         if (j > 0) nras2bet += j;
         if (j > CalcInfo_->ras_opi[1][i]) {
-            outfile->Printf("(set_ras_parms): detecting %d electrons ", j - CalcInfo_->ras_opi[1][i]);
+            outfile->Printf("(set_ras_parms): detecting %d beta electrons ", j - CalcInfo_->ras_opi[1][i]);
             outfile->Printf("in RAS III for irrep %d.\n", i);
             outfile->Printf("Some parts of DETCI assume all elec in I and II\n");
+            throw PSIEXCEPTION("DETCI: electrons detected outside of active space.\n");
         }
     }
 

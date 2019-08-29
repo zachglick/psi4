@@ -87,9 +87,6 @@ class HF : public Wavefunction {
     std::vector<std::shared_ptr<BasisSet>> sad_basissets_;
     std::vector<std::shared_ptr<BasisSet>> sad_fitting_basissets_;
 
-    ///
-    bool ref_C_;
-
     /// Current Iteration
     int iteration_;
 
@@ -207,7 +204,7 @@ class HF : public Wavefunction {
     int multiplicity_;
 
     /// SAD Guess and propagation
-    virtual void compute_SAD_guess();
+    virtual void compute_SAD_guess(bool natorb);
     /// Huckel guess
     virtual void compute_huckel_guess();
     // Manual update of SAD density
@@ -276,9 +273,6 @@ class HF : public Wavefunction {
 
     /// Prints some opening information
     void print_header();
-
-    /// Prints some details about nsopi/nmopi, and initial occupations
-    void print_preiterations();
 
     /** Compute/print spin contamination information (if unrestricted) **/
     virtual void compute_spin_contamination();

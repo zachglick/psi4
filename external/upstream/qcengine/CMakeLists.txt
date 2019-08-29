@@ -1,6 +1,6 @@
 if(NOT (${CMAKE_DISABLE_FIND_PACKAGE_qcengine}))
     include(FindPythonModule)
-    find_python_module(qcengine ATLEAST 0.6.3 QUIET)
+    find_python_module(qcengine ATLEAST 0.8.2 QUIET)
 endif()
 
 if(${qcengine_FOUND})
@@ -16,11 +16,12 @@ else()
     message(STATUS "Suitable qcengine could not be located, ${Magenta}Building qcengine${ColourReset} instead.")
 
     file(TO_NATIVE_PATH "${STAGED_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}${PYMOD_INSTALL_LIBDIR}" _install_lib)
+    file(TO_NATIVE_PATH "${STAGED_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}" _install_bin)
 
     ExternalProject_Add(qcengine_external
         DEPENDS qcelemental_external
         BUILD_ALWAYS 1
-        URL https://github.com/MolSSI/QCEngine/archive/v0.6.3.tar.gz
+        URL https://github.com/MolSSI/QCEngine/archive/v0.8.2.tar.gz
         CONFIGURE_COMMAND ""
         UPDATE_COMMAND ""
         BUILD_COMMAND ${PYTHON_EXECUTABLE} setup.py build
@@ -28,5 +29,6 @@ else()
         INSTALL_COMMAND ${PYTHON_EXECUTABLE} setup.py install
                                                       --record=record.txt
                                                       --single-version-externally-managed
+                                                      --install-scripts=${_install_bin}
                                                       --install-lib=${_install_lib})
 endif()

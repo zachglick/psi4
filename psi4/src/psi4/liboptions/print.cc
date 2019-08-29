@@ -61,14 +61,14 @@ std::string Options::to_string() const {
     if (localmap == locals_.end()) return str.str();  // Nothing to print
     const std::map<std::string, Data> &keyvals = localmap->second;
     for (const_iterator pos = keyvals.begin(); pos != keyvals.end(); ++pos) {
-        pos->first.size() > largest_key ? largest_key = pos->first.size() : 0;
-        pos->second.to_string().size() > largest_value ? largest_value = pos->second.to_string().size() : 0;
+        pos->first.size() > largest_key ? largest_key = pos->first.size() : 0;  // lgtm [cpp/useless-expression]
+        pos->second.to_string().size() > largest_value ? largest_value = pos->second.to_string().size() : 0;  // lgtm [cpp/useless-expression]
     }
 
     for (const_iterator local_iter = keyvals.begin(); local_iter != keyvals.end(); ++local_iter) {
         std::stringstream line;
         std::string value;
-        bool option_specified;
+        bool option_specified = false;
         const std::string &name = local_iter->first;
         const_iterator global_iter = globals_.find(name);
         if (local_iter->second.has_changed()) {
@@ -121,8 +121,8 @@ std::string Options::globals_to_string() const {
     int largest_key = 0, largest_value = 7;  // 7 for '(empty)'
 
     for (const_iterator pos = globals_.begin(); pos != globals_.end(); ++pos) {
-        pos->first.size() > largest_key ? largest_key = pos->first.size() : 0;
-        pos->second.to_string().size() > largest_value ? largest_value = pos->second.to_string().size() : 0;
+        pos->first.size() > largest_key ? largest_key = pos->first.size() : 0;  // lgtm [cpp/useless-expression]
+        pos->second.to_string().size() > largest_value ? largest_value = pos->second.to_string().size() : 0;  // lgtm [cpp/useless-expression]
     }
 
     for (const_iterator pos = globals_.begin(); pos != globals_.end(); ++pos) {

@@ -134,6 +134,7 @@ class PSI_API VBase {
     /// Throws by default
     virtual void compute_V(std::vector<SharedMatrix> ret);
     virtual void compute_Vx(std::vector<SharedMatrix> Dx, std::vector<SharedMatrix> ret);
+    virtual std::vector<SharedMatrix> compute_fock_derivatives();
     virtual SharedMatrix compute_gradient();
     virtual SharedMatrix compute_hessian();
 
@@ -147,6 +148,18 @@ class PSI_API VBase {
 };
 
 // => Derived Classes <= //
+class SAP : public VBase {
+   protected:
+   public:
+    SAP(std::shared_ptr<SuperFunctional> functional, std::shared_ptr<BasisSet> primary, Options& options);
+    ~SAP() override;
+
+    void initialize() override;
+    void finalize() override;
+
+    void compute_V(std::vector<SharedMatrix> ret) override;
+    void print_header() const override;
+};
 
 class RV : public VBase {
    protected:
@@ -159,6 +172,7 @@ class RV : public VBase {
 
     void compute_V(std::vector<SharedMatrix> ret) override;
     void compute_Vx(std::vector<SharedMatrix> Dx, std::vector<SharedMatrix> ret) override;
+    std::vector<SharedMatrix> compute_fock_derivatives() override;
     SharedMatrix compute_gradient() override;
     SharedMatrix compute_hessian() override;
 

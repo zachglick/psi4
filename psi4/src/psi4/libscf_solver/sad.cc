@@ -68,6 +68,18 @@ using namespace psi;
 
 namespace psi {
 namespace scf {
+// Parse options: either use DF or exact integrals.
+static bool SAD_use_fitting(const Options& opt) {
+    std::string jk_type(opt.get_str("SAD_SCF_TYPE"));
+    if ((jk_type == "DIRECT") || (jk_type == "PK") || (jk_type == "OUT_OF_CORE") || (jk_type == "CD") ||
+        (jk_type == "GTFOCK")) {
+        return false;
+    }
+    if ((jk_type == "DF") || (jk_type == "MEM_DF") || (jk_type == "DISK_DF")) {
+        return true;
+    }
+    throw PSIEXCEPTION("SAD_SCF_TYPE " + opt.get_str("SAD_SCF_TYPE") + " not implemented.\n");
+}
 
 SADGuess::SADGuess(std::shared_ptr<BasisSet> basis, std::vector<std::shared_ptr<BasisSet>> atomic_bases,
                    Options& options)
@@ -322,7 +334,7 @@ void SADGuess::run_atomic_calculations(SharedMatrix& DAO, SharedMatrix& HuckelC,
         atomic_Chu[uniA] = std::make_shared<Matrix>("Atomic Huckel C", nbf, nhu);
         atomic_Ehu[uniA] = std::make_shared<Vector>("Atomic Huckel E", nhu);
 
-        if (options_.get_str("SAD_SCF_TYPE") == "DF") {
+        if (SAD_use_fitting(options_)) {
             get_uhf_atomic_density(atomic_bases_[index], atomic_fit_bases_[index], occ_a, occ_b, atomic_D[uniA],
                                    atomic_Chu[uniA], atomic_Ehu[uniA]);
         } else {
@@ -514,21 +526,17 @@ void SADGuess::get_uhf_atomic_density(std::shared_ptr<BasisSet> bas, std::shared
     std::unique_ptr<JK> jk;
 
     // Need a very special auxiliary basis here
-    if (options_.get_str("SAD_SCF_TYPE") == "DF") {
+    if (SAD_use_fitting(options_)) {
         MemDFJK* dfjk = new MemDFJK(bas, fit);
         if (options_["DF_INTS_NUM_THREADS"].has_changed())
             dfjk->set_df_ints_num_threads(options_.get_int("DF_INTS_NUM_THREADS"));
         dfjk->dfh()->set_print_lvl(0);
         jk = std::unique_ptr<JK>(dfjk);
-    } else if (options_.get_str("SAD_SCF_TYPE") == "DIRECT") {
+    } else {
         DirectJK* directjk(new DirectJK(bas));
         if (options_["DF_INTS_NUM_THREADS"].has_changed())
             directjk->set_df_ints_num_threads(options_.get_int("DF_INTS_NUM_THREADS"));
         jk = std::unique_ptr<JK>(directjk);
-    } else {
-        std::stringstream msg;
-        msg << "SAD: JK type of " << options_.get_str("SAD_SCF_TYPE") << " not understood.\n";
-        throw PSIEXCEPTION(msg.str());
     }
 
     jk->set_memory((size_t)(0.5 * (Process::environment.get_memory() / 8L)));
@@ -753,13 +761,13 @@ SharedMatrix SADGuess::huckel_guess() {
 
     return huckel;
 }
-void HF::compute_SAD_guess() {
+void HF::compute_SAD_guess(bool natorb) {
     if (sad_basissets_.empty()) {
         throw PSIEXCEPTION("  SCF guess was set to SAD, but sad_basissets_ was empty!\n\n");
     }
 
     auto guess = std::make_shared<SADGuess>(basisset_, sad_basissets_, options_);
-    if (options_.get_str("SAD_SCF_TYPE") == "DF") {
+    if (SAD_use_fitting(options_)) {
         if (sad_fitting_basissets_.empty()) {
             throw PSIEXCEPTION("  SCF guess was set to SAD with DiskDFJK, but sad_fitting_basissets_ was empty!\n\n");
         }
@@ -768,40 +776,72 @@ void HF::compute_SAD_guess() {
 
     guess->compute_guess();
 
-    SharedMatrix Ca_sad = guess->Ca();
-    SharedMatrix Cb_sad = guess->Cb();
-    Da_->copy(guess->Da());
-    Db_->copy(guess->Db());
-    Dimension sad_dim(Da_->nirrep(), "SAD Dimensions");
+    if (natorb) {
+        // SAD natural orbitals (doi:10.1021/acs.jctc.8b01089)
 
-    for (int h = 0; h < Da_->nirrep(); h++) {
-        int nso = Ca_sad->rowspi()[h];
-        int nmo = Ca_sad->colspi()[h];
-        if (nmo > X_->colspi()[h]) nmo = X_->colspi()[h];
+        // Number of basis functions
+        auto nbf(basisset_->nbf());
+        // Grab the density matrix
+        auto Dhelp = std::make_shared<Matrix>("Helper density matrix", AO2SO_->colspi(), AO2SO_->colspi());
+        Dhelp->copy(guess->Da());
+        // Take its negative so that most strongly occupied orbitals come first
+        Dhelp->scale(-1.0);
 
-        sad_dim[h] = nmo;
-
-        if (!nso || !nmo) continue;
-
-        double** Cap = Ca_->pointer(h);
-        double** Cbp = Cb_->pointer(h);
-        double** Ca2p = Ca_sad->pointer(h);
-        double** Cb2p = Cb_sad->pointer(h);
-
-        for (int i = 0; i < nso; i++) {
-            ::memcpy((void*)Cap[i], (void*)Ca2p[i], nmo * sizeof(double));
-            ::memcpy((void*)Cbp[i], (void*)Cb2p[i], nmo * sizeof(double));
+        // Transfrom to an orthonormal basis
+        Dhelp->transform(S_);
+        Dhelp->transform(X_);
+        if (debug_) {
+            outfile->Printf("SAD Density Matrix (orthonormal basis):\n");
+            Dhelp->print();
         }
+
+        // Diagonalize the SAD density and form the natural orbitals
+        auto Cno_temp_ = SharedMatrix(factory_->create_matrix("SAD NO temp"));
+        Dhelp->diagonalize(Cno_temp_, epsilon_a_);
+        if (debug_) {
+            outfile->Printf("SAD Natural Orbital Occupations:\n");
+            epsilon_a_->print();
+        }
+        Ca_->gemm(false, false, 1.0, X_, Cno_temp_, 0.0);
+
+        // Same orbitals for beta
+        Cb_->copy(Ca_);
+        epsilon_b_->copy(*epsilon_a_);
+
+    } else {
+        SharedMatrix Ca_sad = guess->Ca();
+        SharedMatrix Cb_sad = guess->Cb();
+        Da_->copy(guess->Da());
+        Db_->copy(guess->Db());
+        Dimension sad_dim(Da_->nirrep(), "SAD Dimensions");
+
+        for (int h = 0; h < Da_->nirrep(); h++) {
+            int nso = Ca_sad->rowspi()[h];
+            int nmo = Ca_sad->colspi()[h];
+            if (nmo > X_->colspi()[h]) nmo = X_->colspi()[h];
+
+            sad_dim[h] = nmo;
+
+            if (!nso || !nmo) continue;
+
+            double** Cap = Ca_->pointer(h);
+            double** Cbp = Cb_->pointer(h);
+            double** Ca2p = Ca_sad->pointer(h);
+            double** Cb2p = Cb_sad->pointer(h);
+            for (int i = 0; i < nso; i++) {
+                C_DCOPY(nmo, Ca2p[i], 1, Cap[i], 1);
+                C_DCOPY(nmo, Cb2p[i], 1, Cbp[i], 1);
+            }
+        }
+
+        nalphapi_ = sad_dim;
+        nbetapi_ = sad_dim;
+        nalpha_ = sad_dim.sum();
+        nbeta_ = sad_dim.sum();
+        doccpi_ = sad_dim;
+        soccpi_ = Dimension(Da_->nirrep(), "SAD SOCC dim (0's)");
+        energies_["Total Energy"] = 0.0;  // This is the -1th iteration
     }
-
-    nalphapi_ = sad_dim;
-    nbetapi_ = sad_dim;
-    nalpha_ = sad_dim.sum();
-    nbeta_ = sad_dim.sum();
-    doccpi_ = sad_dim;
-    soccpi_ = Dimension(Da_->nirrep(), "SAD SOCC dim (0's)");
-
-    energies_["Total Energy"] = 0.0;  // This is the -1th iteration
 }
 void HF::read_SAD_guess(SharedMatrix& D_guess) {
     if (sad_basissets_.empty()) {
@@ -859,7 +899,7 @@ void HF::compute_huckel_guess() {
     }
 
     auto guess = std::make_shared<SADGuess>(basisset_, sad_basissets_, options_);
-    if (options_.get_str("SAD_SCF_TYPE") == "DF") {
+    if (SAD_use_fitting(options_)) {
         if (sad_fitting_basissets_.empty()) {
             throw PSIEXCEPTION("  SCF guess was set to SAD with DiskDFJK, but sad_fitting_basissets_ was empty!\n\n");
         }

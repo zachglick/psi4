@@ -909,6 +909,10 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         default is conservative, but there isn't much to be gained from
         loosening it, especially for higher-order SAPT. -*/
         options.add_double("INTS_TOLERANCE", 1.0E-12);
+        /*- Do use Combined Schwarz Approximation Maximum (CSAM) screening on
+        two-electron integrals. This is a slightly tighter bound than that of
+        default Schwarz screening. -*/
+        options.add_str("SCREENING", "SCHWARZ" "SCHWARZ CSAM");
         /*- Memory safety -*/
         options.add_double("SAPT_MEM_SAFETY", 0.9);
         /*- Do force SAPT2 and higher to die if it thinks there isn't enough
@@ -997,6 +1001,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
 
         /*- Do an F-SAPT analysis? -*/
         options.add_bool("FISAPT_DO_FSAPT", true);
+        /*- Do F-SAPT Dispersion? -*/
+        options.add_bool("FISAPT_DO_FSAPT_DISP", true);
         /*- Filepath to drop F-SAPT data within input file directory -*/
         options.add_str_i("FISAPT_FSAPT_FILEPATH", "fsapt/");
         /*- Do F-SAPT exchange scaling? (ratio of S^\infty to S^2) -*/
@@ -1244,8 +1250,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("INTS_TOLERANCE", 0.0);
         /*- The type of guess orbitals.  Defaults to ``READ`` for geometry optimizations after the first step, to
           ``CORE`` for single atoms, and to ``SAD`` otherwise. The ``HUCKEL`` guess employs on-the-fly calculations
-          like SAD, as described in doi:10.1021/acs.jctc.8b01089. -*/
-        options.add_str("GUESS", "AUTO", "AUTO CORE GWH SAD HUCKEL READ");
+          like SAD, as described in doi:10.1021/acs.jctc.8b01089 which also describes the SAP guess. -*/
+        options.add_str("GUESS", "AUTO", "AUTO CORE GWH SAD SADNO SAP HUCKEL READ");
         /*- Mix the HOMO/LUMO in UHF or UKS to break alpha/beta spatial symmetry.
         Useful to produce broken-symmetry unrestricted solutions.
         Notice that this procedure is defined only for calculations in C1 symmetry. -*/
@@ -1358,7 +1364,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_int("FRAC_START", 0);
         /*- The absolute indices of occupied orbitals to fractionally occupy (+/- for alpha/beta) -*/
         options.add("FRAC_OCC", new ArrayType());
-        /*- The occupations of the orbital indices specified above ($0.0\ge occ \ge 1.0$) -*/
+        /*- The occupations of the orbital indices specified above ($0.0\le {\rm occ} \le 1.0$) -*/
         options.add("FRAC_VAL", new ArrayType());
         /*- Do use DIIS extrapolation to accelerate convergence in frac? -*/
         options.add_bool("FRAC_DIIS", true);
@@ -1446,7 +1452,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Maximum number of atomic SCF iterations within SAD !expert -*/
         options.add_int("SAD_MAXITER", 50);
         /*- SCF type used for atomic calculations in SAD guess !expert -*/
-        options.add_str("SAD_SCF_TYPE", "DF", "DIRECT DF");
+        options.add_str("SAD_SCF_TYPE", "DF", "DIRECT DF MEM_DF DISK_DF PK OUT_OF_CORE CD GTFOCK");
         /*- Do force an even distribution of occupations across the last partially occupied orbital shell? !expert -*/
         options.add_bool("SAD_FRAC_OCC", true);
         /*- Do use spin-averaged occupations instead of atomic ground spin state in fractional SAD? !expert -*/
@@ -1485,16 +1491,20 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Radial Scheme. -*/
         options.add_str("DFT_RADIAL_SCHEME", "TREUTLER", "TREUTLER BECKE MULTIEXP EM MURA");
         /*- Nuclear Scheme. -*/
-        options.add_str("DFT_NUCLEAR_SCHEME", "TREUTLER", "TREUTLER BECKE NAIVE STRATMANN");
+        options.add_str("DFT_NUCLEAR_SCHEME", "TREUTLER", "TREUTLER BECKE NAIVE STRATMANN SBECKE");
         /*- Factor for effective BS radius in radial grid. -*/
         options.add_double("DFT_BS_RADIUS_ALPHA", 1.0);
         /*- DFT basis cutoff. -*/
         options.add_double("DFT_BASIS_TOLERANCE", 1.0E-12);
+        /*- grid weight cutoff. Disable with -1.0. !expert -*/
+        options.add_double("DFT_WEIGHTS_TOLERANCE", 1.0E-15);
         /*- The DFT grid specification, such as SG1.!expert -*/
         options.add_str("DFT_GRID_NAME", "", "SG0 SG1");
-        /*- Pruning Scheme. !expert -*/
-        options.add_str("DFT_PRUNING_SCHEME", "FLAT",
-                        "FLAT P_GAUSSIAN D_GAUSSIAN P_SLATER D_SLATER LOG_GAUSSIAN LOG_SLATER");
+        /*- Select approach for pruning. Options ``ROBUST`` and ``TREUTLER`` prune based on regions (proximity to nucleus) while
+        ``FLAT`` ``P_GAUSSIAN`` ``D_GAUSSIAN`` ``P_SLATER`` ``D_SLATER`` ``LOG_GAUSSIAN`` ``LOG_SLATER`` prune based on decaying functions (experts only!).
+        The recommended scheme is ``ROBUST``. -*/
+        options.add_str("DFT_PRUNING_SCHEME", "NONE",
+                        "ROBUST TREUTLER NONE FLAT P_GAUSSIAN D_GAUSSIAN P_SLATER D_SLATER LOG_GAUSSIAN LOG_SLATER NONE");
         /*- Spread alpha for logarithmic pruning. !expert -*/
         options.add_double("DFT_PRUNING_ALPHA", 1.0);
         /*- The maximum number of grid points per evaluation block. !expert -*/
@@ -1557,6 +1567,11 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
             CIS analysis
          -*/
         options.add_double("CIS_AMPLITUDE_CUTOFF", 0.15);
+        /*- Which tasks to run CPHF For
+         *  Valid choices:
+         *  -Polarizability
+         * -*/
+        options.add("CPHF_TASKS", new ArrayType());
         /*- Memory safety factor for allocating JK
         -*/
         options.add_double("CPHF_MEM_SAFETY_FACTOR", 0.75);

@@ -44,6 +44,8 @@
 #include "psi4/libdiis/diismanager.h"
 #include "psi4/libfock/jk.h"
 #include "psi4/libmints/basisset.h"
+#include "psi4/libmints/extern.h"
+#include "psi4/libmints/factory.h"
 #include "psi4/libmints/integral.h"
 #include "psi4/libmints/matrix.h"
 #include "psi4/libmints/molecule.h"
@@ -151,9 +153,9 @@ void FISAPT::partition() {
     }
 
     outfile->Printf("   => Atomic Partitioning <= \n\n");
-    outfile->Printf("    Monomer A: %3d atoms\n", indA.size());
-    outfile->Printf("    Monomer B: %3d atoms\n", indB.size());
-    outfile->Printf("    Monomer C: %3d atoms\n", indC.size());
+    outfile->Printf("    Monomer A: %3zu atoms\n", indA.size());
+    outfile->Printf("    Monomer B: %3zu atoms\n", indB.size());
+    outfile->Printf("    Monomer C: %3zu atoms\n", indC.size());
     outfile->Printf("\n");
 
     // => Fragment Orbital Charges <= //
@@ -194,9 +196,8 @@ void FISAPT::partition() {
         double delta = options_.get_double("FISAPT_CHARGE_COMPLETENESS");
         outfile->Printf("    Charge Completeness = %5.3f\n\n", delta);
         for (int a = 0; a < na; a++) {
-            if (QFp[0][a] > delta) {
-            } else if (QFp[1][a] > delta) {
-            } else if (QFp[2][a] > delta) {
+            if (QFp[0][a] > delta || QFp[1][a] > delta || QFp[2][a] > delta) {
+                ;
             } else if (QFp[0][a] + QFp[2][a] > delta) {
                 link_orbs.push_back(a);
                 link_types.push_back("AC");
@@ -207,6 +208,7 @@ void FISAPT::partition() {
                 link_orbs.push_back(a);
                 link_types.push_back("AB");
             } else if (QFp[0][a] + QFp[1][a] > delta) {
+                ;
             } else {
                 throw PSIEXCEPTION("FISAPT: A, B, and C are bonded?! 3c-2e bonds are not cool.");
             }
@@ -474,11 +476,11 @@ void FISAPT::partition() {
     double YC = round(2.0 * orbsC.size());
 
     outfile->Printf("   => Partition Summary <=\n\n");
-    outfile->Printf("    Monomer A: %2d charge, %3d protons, %3d electrons, %3d docc\n", (int)(ZA - YA), (int)ZA,
+    outfile->Printf("    Monomer A: %2d charge, %3d protons, %3d electrons, %3zu docc\n", (int)(ZA - YA), (int)ZA,
                     (int)YA, orbsA.size());
-    outfile->Printf("    Monomer B: %2d charge, %3d protons, %3d electrons, %3d docc\n", (int)(ZB - YB), (int)ZB,
+    outfile->Printf("    Monomer B: %2d charge, %3d protons, %3d electrons, %3zu docc\n", (int)(ZB - YB), (int)ZB,
                     (int)YB, orbsB.size());
-    outfile->Printf("    Monomer C: %2d charge, %3d protons, %3d electrons, %3d docc\n", (int)(ZC - YC), (int)ZC,
+    outfile->Printf("    Monomer C: %2d charge, %3d protons, %3d electrons, %3zu docc\n", (int)(ZC - YC), (int)ZC,
                     (int)YC, orbsC.size());
     outfile->Printf("\n");
 }
@@ -592,6 +594,52 @@ void FISAPT::nuclear() {
         }
     }
 
+    // => External potential <= //
+
+    if (reference_->external_pot()) {
+        if (options_.get_bool("EXTERNAL_POTENTIAL_SYMMETRY") == false && reference_->nirrep() != 1)
+            throw PSIEXCEPTION("SCF: External Fields are not consistent with symmetry. Set symmetry c1.");
+
+        std::shared_ptr<Matrix> V_extern = reference_->external_pot()->computePotentialMatrix(primary_);
+
+        if (options_.get_bool("EXTERNAL_POTENTIAL_SYMMETRY")) {
+            // Attempt to apply symmetry. No error checking is performed.
+            std::shared_ptr<Matrix> V_extern_sym = reference_->matrix_factory()->create_shared_matrix("External Potential");
+            V_extern_sym->apply_symmetry(V_extern, reference_->aotoso());
+            V_extern = V_extern_sym;
+        }
+
+        if (reference_->get_print()) {
+            reference_->external_pot()->set_print(reference_->get_print());
+            reference_->external_pot()->print();
+        }
+        if (reference_->get_print() > 3) V_extern->print();
+
+        // Save external potential to add to one-electron SCF potential
+        matrices_["VE"] = V_extern;
+
+        // Extra nuclear repulsion
+        std::vector<int> none;
+        std::vector<int> frag_list(1);
+        double Enuc_extern;
+        char frag = '@'; // Next characters are 'A', 'B', 'C'
+        for (int A = 0; A < mol->nfragments(); A++) {
+            frag++;
+            frag_list[0] = A;
+            std::shared_ptr<Molecule> mol_frag = mol->extract_subsets(frag_list, none);
+            Enuc_extern = reference_->external_pot()->computeNuclearEnergy(mol_frag);
+
+            outfile->Printf("           Old Nuclear Repulsion %c: %24.16E [Eh]\n", frag, Enucsp[A][A]);
+            outfile->Printf("    Additional Nuclear Repulsion %c: %24.16E [Eh]\n", frag, Enuc_extern);
+            outfile->Printf("         Total Nuclear Repulsion %c: %24.16E [Eh]\n", frag, Enucsp[A][A] + Enuc_extern);
+
+            Enucsp[A][A] += Enuc_extern;
+            Etot += Enuc_extern;
+        }
+        matrices_["E NUC"] = Enucs;
+        outfile->Printf("\n");
+    }
+
     // => Print <= //
 
     // Zs->print();
@@ -665,9 +713,12 @@ void FISAPT::scf() {
     // => A <= //
 
     outfile->Printf("  ==> SCF A: <==\n\n");
+    std::shared_ptr<Matrix> VA_SCF(matrices_["VA"]->clone());
+    VA_SCF->copy(matrices_["VA"]);
+    if (reference_->external_pot()) VA_SCF->add(matrices_["VE"]);
     std::shared_ptr<FISAPTSCF> scfA =
         std::make_shared<FISAPTSCF>(jk_, matrices_["E NUC"]->get(0, 0), matrices_["S"], matrices_["XC"], matrices_["T"],
-                                    matrices_["VA"], matrices_["WC"], matrices_["LoccA"], options_);
+                                    VA_SCF, matrices_["WC"], matrices_["LoccA"], options_);
     scfA->compute_energy();
 
     scalars_["E0 A"] = scfA->scalars()["E SCF"];
@@ -681,9 +732,12 @@ void FISAPT::scf() {
     // => B <= //
 
     outfile->Printf("  ==> SCF B: <==\n\n");
+    std::shared_ptr<Matrix> VB_SCF(matrices_["VB"]->clone());
+    VB_SCF->copy(matrices_["VB"]);
+    if (reference_->external_pot()) VB_SCF->add(matrices_["VE"]);
     std::shared_ptr<FISAPTSCF> scfB =
         std::make_shared<FISAPTSCF>(jk_, matrices_["E NUC"]->get(1, 1), matrices_["S"], matrices_["XC"], matrices_["T"],
-                                    matrices_["VB"], matrices_["WC"], matrices_["LoccB"], options_);
+                                    VB_SCF, matrices_["WC"], matrices_["LoccB"], options_);
     scfB->compute_energy();
 
     scalars_["E0 B"] = scfB->scalars()["E SCF"];
@@ -886,6 +940,7 @@ void FISAPT::dHF() {
     H_AC->copy(T);
     H_AC->add(V_A);
     H_AC->add(V_C);
+    if (reference_->external_pot()) H_AC->add(matrices_["VE"]);
 
     std::shared_ptr<Matrix> F_AC(D_A->clone());
     F_AC->copy(H_AC);
@@ -918,6 +973,7 @@ void FISAPT::dHF() {
     H_BC->copy(T);
     H_BC->add(V_B);
     H_BC->add(V_C);
+    if (reference_->external_pot()) H_BC->add(matrices_["VE"]);
 
     std::shared_ptr<Matrix> F_BC(D_B->clone());
     F_BC->copy(H_BC);
@@ -949,6 +1005,7 @@ void FISAPT::dHF() {
     std::shared_ptr<Matrix> H_A(D_A->clone());
     H_A->copy(T);
     H_A->add(V_A);
+    if (reference_->external_pot()) H_A->add(matrices_["VE"]);
 
     std::shared_ptr<Matrix> F_A(D_A->clone());
     F_A->copy(H_A);
@@ -966,6 +1023,7 @@ void FISAPT::dHF() {
     std::shared_ptr<Matrix> H_B(D_B->clone());
     H_B->copy(T);
     H_B->add(V_B);
+    if (reference_->external_pot()) H_B->add(matrices_["VE"]);
 
     std::shared_ptr<Matrix> F_B(D_B->clone());
     F_B->copy(H_B);
@@ -983,6 +1041,7 @@ void FISAPT::dHF() {
     std::shared_ptr<Matrix> H_C(D_C->clone());
     H_C->copy(T);
     H_C->add(V_C);
+    if (reference_->external_pot()) H_C->add(matrices_["VE"]);
 
     std::shared_ptr<Matrix> F_C(D_C->clone());
     F_C->copy(H_C);
@@ -1033,6 +1092,7 @@ void FISAPT::dHF() {
     std::shared_ptr<Matrix> LH_A(T->clone());
     LH_A->copy(T);
     LH_A->add(V_A);
+    if (reference_->external_pot()) LH_A->add(matrices_["VE"]);
     std::shared_ptr<Matrix> LF_A(LH_A->clone());
     LF_A->copy(LH_A);
     LF_A->add(LJ_A);
@@ -1048,6 +1108,7 @@ void FISAPT::dHF() {
     std::shared_ptr<Matrix> LH_B(T->clone());
     LH_B->copy(T);
     LH_B->add(V_B);
+    if (reference_->external_pot()) LH_B->add(matrices_["VE"]);
     std::shared_ptr<Matrix> LF_B(LH_B->clone());
     LF_B->copy(LH_B);
     LF_B->add(LJ_B);
@@ -1068,6 +1129,7 @@ void FISAPT::dHF() {
     LH_AC->copy(T);
     LH_AC->add(V_A);
     LH_AC->add(V_C);
+    if (reference_->external_pot()) LH_AC->add(matrices_["VE"]);
     std::shared_ptr<Matrix> LF_AC(LH_AC->clone());
     LF_AC->copy(LH_AC);
     LF_AC->add(J_C);
@@ -1096,6 +1158,7 @@ void FISAPT::dHF() {
     LH_BC->copy(T);
     LH_BC->add(V_B);
     LH_BC->add(V_C);
+    if (reference_->external_pot()) LH_BC->add(matrices_["VE"]);
     std::shared_ptr<Matrix> LF_BC(LH_BC->clone());
     LF_BC->copy(LH_BC);
     LF_BC->add(J_C);
@@ -1124,6 +1187,7 @@ void FISAPT::dHF() {
     LH_BA->copy(T);
     LH_BA->add(V_B);
     LH_BA->add(V_A);
+    if (reference_->external_pot()) LH_BA->add(matrices_["VE"]);
     std::shared_ptr<Matrix> LF_BA(LH_BA->clone());
     LF_BA->copy(LH_BA);
     LF_BA->add(LJ_A);
@@ -2230,7 +2294,7 @@ void FISAPT::disp(std::map<std::string, SharedMatrix> matrix_cache, std::map<std
         outfile->Printf("\n");
     }
 }
-void FISAPT::sinf_disp(std::map<std::string, SharedMatrix> matrix_cache, std::map<std::string, SharedVector> vector_cache, 
+void FISAPT::sinf_disp(std::map<std::string, SharedMatrix> matrix_cache, std::map<std::string, SharedVector> vector_cache,
                         bool do_print) {
     if (do_print) {
         outfile->Printf("  ==> Dispersion <==\n\n");
@@ -2274,7 +2338,7 @@ void FISAPT::sinf_disp(std::map<std::string, SharedMatrix> matrix_cache, std::ma
     std::shared_ptr<Matrix> V_B = matrix_cache["V_B"];
 
     // => Intermolelcular overlap matrix and inverse <= //
-    std::shared_ptr<Matrix> Sab = Matrix::triplet(Cocc0A, S, Cocc0B, true, false, false);
+    std::shared_ptr<Matrix> Sab = linalg::triplet(Cocc0A, S, Cocc0B, true, false, false);
     double** Sabp = Sab->pointer();
     auto D = std::make_shared<Matrix>("D", na + nb, na + nb);
     D->identity();
@@ -2289,8 +2353,8 @@ void FISAPT::sinf_disp(std::map<std::string, SharedMatrix> matrix_cache, std::ma
 
     // => New Stuff <= //
     // Start with T's
-    std::shared_ptr<Matrix> Sbr = Matrix::triplet(Cocc0B, S, Cvir0A, true, false, false);
-    std::shared_ptr<Matrix> Sas = Matrix::triplet(Cocc0A, S, Cvir0B, true, false, false);
+    std::shared_ptr<Matrix> Sbr = linalg::triplet(Cocc0B, S, Cvir0A, true, false, false);
+    std::shared_ptr<Matrix> Sas = linalg::triplet(Cocc0A, S, Cvir0B, true, false, false);
     auto Tar = std::make_shared<Matrix>("Tar", na, nr);
     auto Tbr = std::make_shared<Matrix>("Tbr", nb, nr);
     auto Tas = std::make_shared<Matrix>("Tas", na, ns);
@@ -2314,11 +2378,11 @@ void FISAPT::sinf_disp(std::map<std::string, SharedMatrix> matrix_cache, std::ma
     auto C2b = std::make_shared<Matrix>("C2b", nn, nb);
 
     C_DGEMM('N', 'N', nn, na, na, 1.0, Cocc0A->pointer()[0], na, &Dp[0][0], na + nb, 0.0,
-            C1a->pointer()[0], na);                                                  
+            C1a->pointer()[0], na);
     C_DGEMM('N', 'N', nn, nb, nb, 1.0, Cocc0B->pointer()[0], nb, &Dp[na][na], na + nb, 0.0,
-            C1b->pointer()[0], nb);                                                  
+            C1b->pointer()[0], nb);
     C_DGEMM('N', 'N', nn, na, nb, 1.0, Cocc0B->pointer()[0], nb, &Dp[na][0], na + nb, 0.0,
-            C2a->pointer()[0], na);                                                  
+            C2a->pointer()[0], na);
     C_DGEMM('N', 'N', nn, nb, na, 1.0, Cocc0A->pointer()[0], na, &Dp[0][na], na + nb, 0.0,
             C2b->pointer()[0], nb);
 
@@ -2326,15 +2390,15 @@ void FISAPT::sinf_disp(std::map<std::string, SharedMatrix> matrix_cache, std::ma
     std::vector<std::shared_ptr<Matrix> > hold_these;
     hold_these.push_back(Cocc0A);
     hold_these.push_back(Cocc0B);
-    
-    auto Cocc0AB = Matrix::horzcat(hold_these);
+
+    auto Cocc0AB = linalg::horzcat(hold_these);
     hold_these.clear();
-    
+
     // Half transform D_ia and D_ib for JK
     auto D_Ni_a = std::make_shared<Matrix>("D_Ni_a", nn, na + nb);
     auto D_Ni_b = std::make_shared<Matrix>("D_Ni_b", nn, na + nb);
-    
-    C_DGEMM('N', 'N', nn, na + nb, na, 1.0, Cocc0A->pointer()[0], na, &Dp[0][0], na + nb, 0.0, 
+
+    C_DGEMM('N', 'N', nn, na + nb, na, 1.0, Cocc0A->pointer()[0], na, &Dp[0][0], na + nb, 0.0,
             D_Ni_a->pointer()[0], na + nb);
     C_DGEMM('N', 'N', nn, na + nb, nb, 1.0, Cocc0B->pointer()[0], nb, &Dp[na][0], na + nb, 0.0,
             D_Ni_b->pointer()[0], na + nb);
@@ -2359,7 +2423,7 @@ void FISAPT::sinf_disp(std::map<std::string, SharedMatrix> matrix_cache, std::ma
     Cl.push_back(Cocc0AB);
     Cr.push_back(D_Ni_b);
     jk_->compute();
-    
+
     std::shared_ptr<Matrix> J_D_ia = J[0];
     std::shared_ptr<Matrix> K_D_ia = K[0];
 
@@ -2367,13 +2431,13 @@ void FISAPT::sinf_disp(std::map<std::string, SharedMatrix> matrix_cache, std::ma
     std::shared_ptr<Matrix> K_D_ib = K[1];
 
     // Finish D_ia and D_ib transformation to make tilded C's
-    auto D_ia = Matrix::doublet(Cocc0AB, D_Ni_a, false, true);
-    auto D_ib = Matrix::doublet(Cocc0AB, D_Ni_b, false, true);
-    
-    auto Ct_Kr = Matrix::triplet(D_ib, S, Cvir0A, false, false, false);
+    auto D_ia = linalg::doublet(Cocc0AB, D_Ni_a, false, true);
+    auto D_ib = linalg::doublet(Cocc0AB, D_Ni_b, false, true);
+
+    auto Ct_Kr = linalg::triplet(D_ib, S, Cvir0A, false, false, false);
     Ct_Kr->scale(-1);
     Ct_Kr->add(Cvir0A);
-    auto Ct_Ks = Matrix::triplet(D_ia, S, Cvir0B, false, false, false);
+    auto Ct_Ks = linalg::triplet(D_ia, S, Cvir0B, false, false, false);
     Ct_Ks->scale(-1);
     Ct_Ks->add(Cvir0B);
 
@@ -2384,23 +2448,23 @@ void FISAPT::sinf_disp(std::map<std::string, SharedMatrix> matrix_cache, std::ma
     AJK->scale(2);
     AJK->add(V_A);
     AJK->subtract(K_D_ia);
-    
-    auto AJK_ar = Matrix::triplet(C2a, AJK, Ct_Kr, true, false, false);
-    auto AJK_as = Matrix::triplet(C2a, AJK, Ct_Ks, true, false, false);
-    auto AJK_br = Matrix::triplet(C1b, AJK, Ct_Kr, true, false, false);
-    auto AJK_bs = Matrix::triplet(C1b, AJK, Ct_Ks, true, false, false);
-    
+
+    auto AJK_ar = linalg::triplet(C2a, AJK, Ct_Kr, true, false, false);
+    auto AJK_as = linalg::triplet(C2a, AJK, Ct_Ks, true, false, false);
+    auto AJK_br = linalg::triplet(C1b, AJK, Ct_Kr, true, false, false);
+    auto AJK_bs = linalg::triplet(C1b, AJK, Ct_Ks, true, false, false);
+
     std::shared_ptr<Matrix> BJK(J_D_ib->clone());
     BJK->zero();
     BJK->add(J_D_ib);
     BJK->scale(2);
     BJK->add(V_B);
     BJK->subtract(K_D_ib);
-    
-    auto BJK_ar = Matrix::triplet(C1a, BJK, Ct_Kr, true, false, false);
-    auto BJK_as = Matrix::triplet(C1a, BJK, Ct_Ks, true, false, false);
-    auto BJK_br = Matrix::triplet(C2b, BJK, Ct_Kr, true, false, false);
-    auto BJK_bs = Matrix::triplet(C2b, BJK, Ct_Ks, true, false, false);
+
+    auto BJK_ar = linalg::triplet(C1a, BJK, Ct_Kr, true, false, false);
+    auto BJK_as = linalg::triplet(C1a, BJK, Ct_Ks, true, false, false);
+    auto BJK_br = linalg::triplet(C2b, BJK, Ct_Kr, true, false, false);
+    auto BJK_bs = linalg::triplet(C2b, BJK, Ct_Ks, true, false, false);
 
     // Finish omega terms
     std::shared_ptr<Matrix> omega_ar(AJK_ar->clone());
@@ -2408,19 +2472,19 @@ void FISAPT::sinf_disp(std::map<std::string, SharedMatrix> matrix_cache, std::ma
     omega_ar->add(AJK_ar);
     omega_ar->add(BJK_ar);
     omega_ar->scale(4);
-    
+
     std::shared_ptr<Matrix> omega_as(AJK_as->clone());
     omega_as->zero();
     omega_as->add(AJK_as);
     omega_as->add(BJK_as);
     omega_as->scale(2);
-    
+
     std::shared_ptr<Matrix> omega_br(AJK_br->clone());
     omega_br->zero();
     omega_br->add(AJK_br);
     omega_br->add(BJK_br);
     omega_br->scale(2);
-    
+
     std::shared_ptr<Matrix> omega_bs(AJK_bs->clone());
     omega_bs->zero();
     omega_bs->add(AJK_bs);
@@ -3739,8 +3803,8 @@ void FISAPT::find() {
         // => JK Object <= //
 
         // TODO: Account for 2-index overhead in memory
-        int nso = primary_->nbf();
-        long int jk_memory = (long int)doubles_;
+        auto nso = primary_->nbf();
+        auto jk_memory = (long int)doubles_;
         jk_memory -= 24 * nso * nso;
         jk_memory -= 4 * na * nso;
         jk_memory -= 4 * nb * nso;
@@ -3765,7 +3829,7 @@ void FISAPT::find() {
             if (C < nB + nb) dfh_->fill_tensor("WBar", wB, {C, C + 1});
             if (C < nA + na) dfh_->fill_tensor("WAbs", wB, {C, C + 1});
 
-            outfile->Printf("    Responses for (A <- Source B = %3d) and (B <- Source A = %3d)\n\n",
+            outfile->Printf("    Responses for (A <- Source B = %3zu) and (B <- Source A = %3zu)\n\n",
                             (C < nB + nb ? C : nB + nb - 1), (C < nA + na ? C : nA + na - 1));
 
             auto cphf = std::make_shared<CPHF_FISAPT>();
@@ -4830,8 +4894,8 @@ void CPHF_FISAPT::compute_cphf() {
             if (alpha < 0.0) {
                 throw PSIEXCEPTION("Monomer A: A Matrix is not SPD");
             }
-            int no = x_A_->nrow();
-            int nv = x_A_->ncol();
+            size_t no = x_A_->nrow();
+            size_t nv = x_A_->ncol();
             double** xp = x_A_->pointer();
             double** rp = r_A->pointer();
             double** pp = p_A->pointer();
