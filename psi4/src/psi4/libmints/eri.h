@@ -44,28 +44,37 @@ class CorrelationFactor;
 
 /**
  * \ingroup MINTS
+ * Structure to hold precomputed gaussian product information
+ */
+struct PrimPair {
+    //! x, y, z coordinate of gaussian
+    double P[3];
+    //! Distance between P and shell i center
+    double PA[3];
+    //! Distance between P and shell j center
+    double PB[3];
+    //! alphas for both centers
+    double ai, aj;
+    //! gamma (ai + aj)
+    double gamma;
+    //! Contraction coefficients
+    double ci, cj;
+    //! Overlap between primitives
+    double overlap;
+};
+
+/**
+ * \ingroup MINTS
  * Structure to hold precomputed shell pair information
  */
-typedef struct ShellPair_typ {
+struct ShellPair {
     //! Shells for this information.
     int i, j;
-    //! Matrix over primitives with x, y, z coordinate of average Gaussian
-    double*** P;
     //! Distance between shell i and shell j centers
     double AB[3];
-    //! Distance between P and shell i center
-    double*** PA;
-    //! Distance between P and shell j center
-    double*** PB;
-    //! Array of alphas for both centers
-    double *ai, *aj;
-    //! Array of the gammas (ai + aj)
-    double** gamma;
-    //! Contraction coefficients
-    double *ci, *cj;
-    //! Overlap between primitives on i and j
-    double** overlap;
-} ShellPair;
+    //! Vector of significant primitive pairs that define this shell pair
+    std::vector<PrimPair> nonzeroPrimPairs;
+};
 
 /*! \ingroup MINTS
  *  \class ERI
@@ -97,18 +106,11 @@ class TwoElectronInt : public TwoBodyAOInt {
     void init_shell_pairs12();
     void init_shell_pairs34();
 
-    //! Free shell pair information
-    void free_shell_pairs12();
-    void free_shell_pairs34();
-
     //! Should we use shell pair information?
     bool use_shell_pairs_;
 
-    //! Stack memory pointer, used in init_shell_pairs, freed in destructor
-    double *stack12_, *stack34_;
-
     //! Shell pair information
-    ShellPair **pairs12_, **pairs34_;
+    std::shared_ptr<std::vector<std::vector<ShellPair>>> pairs12_, pairs34_;
 
     //! Evaluates how much memory (in doubles) is needed to store shell pair data
     size_t memory_to_store_shell_pairs(const std::shared_ptr<BasisSet>&, const std::shared_ptr<BasisSet>&);
