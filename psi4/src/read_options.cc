@@ -149,7 +149,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
     options.add_bool("DIE_IF_NOT_CONVERGED", true);
     /*- Integral package to use. If compiled with ERD or Simint support, change this option to use them; LibInt is used
        otherwise. -*/
-    options.add_str("INTEGRAL_PACKAGE", "LIBINT", "ERD LIBINT SIMINT");
+    options.add_str("INTEGRAL_PACKAGE", "LIBINT1", "ERD LIBINT1 SIMINT LIBINT2");
 
     // Note that case-insensitive options are only functional as
     //   globals, not as module-level, and should be defined sparingly
