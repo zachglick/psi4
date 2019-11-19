@@ -53,18 +53,20 @@ def clean_numpy_files():
 atexit.register(clean_numpy_files)
 
 
-def exit_printing(start_time=None):
+def exit_printing(start_time=None, success=None):
     """Prints the exit time and status.
 
     Parameters
     ----------
     start_time : datetime.datetime, optional
         starting time from which the elapsed time is computed.
- 
+    success : bool
+        Provides a success flag, otherwise uses the _success_flag_ global variable
+
     Returns
     -------
     None
- 
+
     """
     end_time = datetime.datetime.now()
     core.print_out("\n    Psi4 stopped on: {}".format(end_time.strftime('%A, %d %B %Y %I:%M%p')))
@@ -73,7 +75,11 @@ def exit_printing(start_time=None):
         run_time = str(run_time).split('.')
         run_time = run_time[0] + '.' + run_time[1][:2]
         core.print_out("\n    Psi4 wall time for execution: {}\n".format(run_time))
-    if _success_flag_:
+
+    if success is None:
+        success = _success_flag_
+
+    if success:
         core.print_out("\n*** Psi4 exiting successfully. Buy a developer a beer!\n")
     else:
         core.print_out("\n*** Psi4 encountered an error. Buy a developer more coffee!\n")
@@ -130,6 +136,7 @@ _addons_ = {
     "erd": _CMake_to_Py_boolean("@ENABLE_erd@"),
     "gdma": _CMake_to_Py_boolean("@ENABLE_gdma@"),
     "pcmsolver": _CMake_to_Py_boolean("@ENABLE_PCMSolver@"),
+    "cppe": which_import("cppe", return_bool=True),
     "simint": _CMake_to_Py_boolean("@ENABLE_simint@"),
     "dftd3": psi4_which("dftd3", return_bool=True),
     "cfour": psi4_which("xcfour", return_bool=True),

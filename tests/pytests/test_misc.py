@@ -19,7 +19,7 @@ def hide_test_xtpl_fn_fn_error():
     with pytest.raises(psi4.UpgradeHelper) as e:
         psi4.energy('cbs', scf_basis='cc-pvdz', scf_scheme=psi4.driver_cbs.xtpl_highest_1)
 
-    assert 'Replace extrapolation function with function name' in str(e)
+    assert 'Replace extrapolation function with function name' in str(e.value)
 
 
 def hide_test_xtpl_cbs_fn_error():
@@ -29,7 +29,7 @@ def hide_test_xtpl_cbs_fn_error():
         psi4.energy(psi4.cbs, scf_basis='cc-pvdz')
         #psi4.energy(psi4.driver.driver_cbs.complete_basis_set, scf_basis='cc-pvdz')
 
-    assert 'Replace cbs or complete_basis_set function with cbs string' in str(e)
+    assert 'Replace cbs or complete_basis_set function with cbs string' in str(e.value)
 
 
 @pytest.mark.parametrize("inp,out", [
@@ -52,7 +52,7 @@ def test_parse_cotton_irreps_error(inp):
     with pytest.raises(psi4.ValidationError) as e:
         psi4.driver.driver_util.parse_cotton_irreps(*inp)
 
-    assert 'not valid for point group' in str(e)
+    assert 'not valid for point group' in str(e.value)
 
 
 # <<<  TODO Deprecated! Delete in Psi4 v1.5  >>>
@@ -95,3 +95,27 @@ def test_deprecated_qcdb_align_scramble():
         mill = qcdb.align.compute_scramble(4, do_resort=False, do_shift=False, do_rotate=False, deflection=1.0, do_mirror=False)
 
     assert compare_arrays([0,1,2,3], mill.atommap, 4, 'atommap')
+
+# <<<  TODO Deprecated! Delete when the error messages are removed.  >>>
+
+def test_deprecated_dcft_calls():
+    psi4.geometry('He')
+    err_substr = "All instances of 'dcft' should be replaced with 'dct'."
+
+    driver_calls = [psi4.energy, psi4.optimize, psi4.gradient, psi4.hessian, psi4.frequencies]
+
+    for call in driver_calls:
+        with pytest.raises(psi4.UpgradeHelper) as e:
+            call('dcft', basis='cc-pvdz')
+        assert err_substr in str(e.value)
+
+    # The errors trapped below are C-side, so they're nameless, Py-side.
+    with pytest.raises(Exception) as e:
+        psi4.set_module_options('dcft', {'e_convergence': 9})
+
+    assert err_substr in str(e.value)
+
+    with pytest.raises(Exception) as e:
+        psi4.set_module_options('dct', {'dcft_functional': 'odc-06'})
+
+    assert err_substr in str(e.value)

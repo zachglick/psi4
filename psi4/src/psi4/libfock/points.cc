@@ -42,6 +42,65 @@
 
 namespace psi {
 
+SAPFunctions::SAPFunctions(std::shared_ptr<BasisSet> primary, int max_points, int max_functions)
+    : PointFunctions(primary, max_points, max_functions) {
+    current_basis_map_ = &basis_values_;
+}
+SAPFunctions::~SAPFunctions() {}
+std::vector<SharedMatrix> SAPFunctions::scratch() {
+    std::vector<SharedMatrix> vec;
+    vec.push_back(temp_);
+    return vec;
+}
+void SAPFunctions::build_temps() { temp_ = std::make_shared<Matrix>("Temp", max_points_, max_functions_); }
+void SAPFunctions::allocate() {
+    BasisFunctions::allocate();
+    point_values_.clear();
+    build_temps();
+}
+void SAPFunctions::compute_points(std::shared_ptr<BlockOPoints> block, bool force_compute) {
+    // => Build basis function values <= //
+    block_index_ = block->index();
+    if (!force_compute && cache_map_ && (cache_map_->find(block->index()) != cache_map_->end())) {
+        current_basis_map_ = &(*cache_map_)[block->index()];
+    } else {
+        current_basis_map_ = &basis_values_;
+        BasisFunctions::compute_functions(block);
+    }
+}
+void SAPFunctions::print(std::string out, int print) const {
+    std::shared_ptr<psi::PsiOutStream> printer = (out == "outfile" ? outfile : std::make_shared<PsiOutStream>(out));
+    printer->Printf("   => SAPFunctions <=\n\n");
+    printer->Printf("    Point Values:\n");
+    for (std::map<std::string, std::shared_ptr<Vector> >::const_iterator it = point_values_.begin();
+         it != point_values_.end(); it++) {
+        printer->Printf("    %s\n", (*it).first.c_str());
+        if (print > 3) {
+            (*it).second->print();
+        }
+    }
+    printer->Printf("\n\n");
+    BasisFunctions::print(out, print);
+}
+std::vector<SharedMatrix> SAPFunctions::D_scratch() {
+    throw PSIEXCEPTION("SAPFunctions::density matrices are not appropriate. Read the source.");
+}
+void SAPFunctions::compute_orbitals(std::shared_ptr<BlockOPoints> block, bool force_compute) {
+    throw PSIEXCEPTION("SAPFunctions::orbitals are not appropriate. Read the source.");
+}
+void SAPFunctions::set_Cs(SharedMatrix /*Ca_AO*/, SharedMatrix /*Cb_AO*/) {
+    throw PSIEXCEPTION("SAPFunctions::orbitals are not appropriate. Read the source.");
+}
+void SAPFunctions::set_Cs(SharedMatrix /*Ca_AO*/) {
+    throw PSIEXCEPTION("SAPFunctions::orbitals are not appropriate. Read the source.");
+}
+void SAPFunctions::set_pointers(SharedMatrix /*Ca_AO*/, SharedMatrix /*Cb_AO*/) {
+    throw PSIEXCEPTION("SAPFunctions::orbitals are not appropriate. Read the source.");
+}
+void SAPFunctions::set_pointers(SharedMatrix /*Ca_AO*/) {
+    throw PSIEXCEPTION("SAPFunctions::orbitals are not appropriate. Read the source.");
+}
+
 RKSFunctions::RKSFunctions(std::shared_ptr<BasisSet> primary, int max_points, int max_functions)
     : PointFunctions(primary, max_points, max_functions) {
     set_ansatz(0);
@@ -643,6 +702,10 @@ void BasisFunctions::compute_functions(std::shared_ptr<BlockOPoints> block) {
     double* x = block->x();
     double* y = block->y();
     double* z = block->z();
+    double* xyz = new double[npoints * 3];
+    ::memcpy(xyz, x, sizeof(double) * npoints);
+    ::memcpy(xyz + npoints, y, sizeof(double) * npoints);
+    ::memcpy(xyz + 2 * npoints, z, sizeof(double) * npoints);
 
     const std::vector<int>& shells = block->shells_local_to_global();
 
@@ -701,15 +764,16 @@ void BasisFunctions::compute_functions(std::shared_ptr<BlockOPoints> block) {
         // Make new pointers, gg computes along rows so we need to skip down `nval` rows.
         size_t row_shift = nvals * npoints;
         double* phi_start = tmpp + row_shift;
+        const int order = (int)puream_ ? GG_SPHERICAL_GAUSSIAN : GG_CARTESIAN_CCA;
 
         // Copmute collocation
         if (deriv_ == 0) {
-            gg_collocation(L, npoints, x, y, z, nprim, norm, alpha, center.data(), (int)puream_, phi_start);
+            gg_collocation(L, npoints, xyz, 1, nprim, norm, alpha, center.data(), order, phi_start);
         } else if (deriv_ == 1) {
             double* phi_x_start = tmp_xp + row_shift;
             double* phi_y_start = tmp_yp + row_shift;
             double* phi_z_start = tmp_zp + row_shift;
-            gg_collocation_deriv1(L, npoints, x, y, z, nprim, norm, alpha, center.data(), (int)puream_, phi_start,
+            gg_collocation_deriv1(L, npoints, xyz, 1, nprim, norm, alpha, center.data(), order, phi_start,
                                   phi_x_start, phi_y_start, phi_z_start);
 
         } else if (deriv_ == 2) {
@@ -722,7 +786,7 @@ void BasisFunctions::compute_functions(std::shared_ptr<BlockOPoints> block) {
             double* phi_yy_start = tmp_yyp + row_shift;
             double* phi_yz_start = tmp_yzp + row_shift;
             double* phi_zz_start = tmp_zzp + row_shift;
-            gg_collocation_deriv2(L, npoints, x, y, z, nprim, norm, alpha, center.data(), (int)puream_, phi_start,
+            gg_collocation_deriv2(L, npoints, xyz, 1, nprim, norm, alpha, center.data(), order, phi_start,
                                   phi_x_start, phi_y_start, phi_z_start, phi_xx_start, phi_xy_start, phi_xz_start,
                                   phi_yy_start, phi_yz_start, phi_zz_start);
         }

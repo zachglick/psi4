@@ -260,6 +260,42 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_str("PCM_CC_TYPE", "PTE", "PTE");
     }
 
+    /*- PE boolean for polarizable embedding module -*/
+    options.add_bool("PE", false);
+    if (name == "PE" || options.read_globals()) {
+        /*- MODULEDESCRIPTION Performs polarizable embedding model (PE) computations. -*/
+
+        /*- Name of the potential file -*/
+        options.add_str_i("POTFILE", "potfile.pot");
+        /*- Use DIIS acceleration to obtain induced moments -*/
+        options.add_bool("DIIS", true);
+        /*- Threshold for induced moments convergence -*/
+        options.add_double("INDUCED_CONVERGENCE", 1e-8);
+        /*- Maximum number of iterations for induced moments -*/
+        options.add_int("MAXITER", 50);
+        /*- Make polarizabilities isotropic -*/
+        options.add_bool("ISOTROPIC_POL", false);
+
+        /*- Activate border options for sites in proximity to the QM/MM border -*/
+        options.add_bool("BORDER", false);
+        /*- border type, either remove or redistribute moments/polarizabilities -*/
+        options.add_str("BORDER_TYPE", "REMOVE", "REMOVE REDIST");
+        /*- minimum radius from QM atoms to MM sites to be taken into account
+        for removal/redistribution -*/
+        options.add_double("BORDER_RMIN", 2.2);
+        /*- unit of BORDER_RMIN, default is atomic units (AU) -*/
+        options.add_str("BORDER_RMIN_UNIT", "AU", "AU AA");
+        /*- order from which moments are removed, e.g.,
+        if set to 1 (default), only charges are redistributed and
+        all higher order moments are removed -*/
+        options.add_int("BORDER_REDIST_ORDER", 1);
+        /*- number of neighbor sites to redistribute to.
+        The default (-1) redistributes to all sites which are not in the border region -*/
+        options.add_int("BORDER_N_REDIST", -1);
+        /*- redistribute polarizabilities? If false, polarizabilities are removed (default) -*/
+        options.add_bool("BORDER_REDIST_POL", false);
+    }
+
     if (name == "DETCI" || options.read_globals()) {
         /*- MODULEDESCRIPTION Performs configuration interaction (CI)
         computations of various types, including restricted-active-space
@@ -1001,6 +1037,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
 
         /*- Do an F-SAPT analysis? -*/
         options.add_bool("FISAPT_DO_FSAPT", true);
+        /*- Do F-SAPT Dispersion? -*/
+        options.add_bool("FISAPT_DO_FSAPT_DISP", true);
         /*- Filepath to drop F-SAPT data within input file directory -*/
         options.add_str_i("FISAPT_FSAPT_FILEPATH", "fsapt/");
         /*- Do F-SAPT exchange scaling? (ratio of S^\infty to S^2) -*/
@@ -1053,13 +1091,13 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- IBO Centers for Pi Degeneracy -*/
         options.add("LOCAL_IBO_STARS", new ArrayType());
     }
-    if (name == "DCFT" || options.read_globals()) {
-        /*-MODULEDESCRIPTION Performs density cumulant functional theory
+    if (name == "DCT" || options.read_globals()) {
+        /*-MODULEDESCRIPTION Performs density cumulant (functional) theory
         computations -*/
 
         /*- Reference wavefunction type -*/
         options.add_str("REFERENCE", "RHF", "UHF RHF ROHF");
-        /*- Algorithm to use for the density cumulant and orbital updates in the DCFT energy computation.
+        /*- Algorithm to use for the density cumulant and orbital updates in the DCT energy computation.
         Two-step algorithm is usually more efficient for small
         systems, but for large systems simultaneous algorithm (default) is recommended.
         If convergence problems are encountered (especially
@@ -1082,7 +1120,7 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         different calculation types. -*/
         options.add_double("E_CONVERGENCE", 1e-10);
         /*- Convergence criterion for the density cumulant and orbital guess for the
-        variationally orbital-optimized DCFT methods. Currently only available for ALGORITHM = SIMULTANEOUS. -*/
+        variationally orbital-optimized DFT methods. Currently only available for ALGORITHM = SIMULTANEOUS. -*/
         options.add_double("GUESS_R_CONVERGENCE", 1e-3);
         /*- Maximum number of macro- or micro-iterations for both energy and response equations -*/
         options.add_int("MAXITER", 40);
@@ -1112,29 +1150,23 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("TIKHONOW_OMEGA", 0.0);
         /*- The shift applied to the denominator in the orbital update iterations !expert-*/
         options.add_double("ORBITAL_LEVEL_SHIFT", 0.0);
-        /*- Controls whether to relax the orbitals during the energy computation or not (for debug puproses only).
-        For practical applications only the default must be used !expert-*/
-        options.add_bool("MO_RELAX", true);
-        /*- Controls whether to ignore terms containing non-idempotent contribution to OPDM or not (for debug puproses
-        only). For practical applications only the default must be used !expert-*/
-        options.add_bool("IGNORE_TAU", false);
         /*- Controls how to cache quantities within the DPD library !expert-*/
         options.add_int("CACHELEVEL", 2);
         /*- Schwarz screening threshold. Mininum absolute value below which TEI are neglected. !expert -*/
         options.add_double("INTS_TOLERANCE", 1e-14);
         /*- Whether to read the orbitals from a previous computation, or to compute
-            an MP2 guess !expert -*/
-        options.add_str("DCFT_GUESS", "MP2", "CC BCC MP2 DCFT");
+            an MP2 guess. !expert -*/
+        options.add_str("DCT_GUESS", "MP2", "CC BCC MP2 DCT");
         /*- Whether to perform a guess DC-06 or DC-12 computation for ODC-06 or ODC-12 methods, respectively.
             Currently only available for ALGORITHM = SIMULTANEOUS. -*/
         options.add_bool("ODC_GUESS", false);
         /*- Controls whether to relax the guess orbitals by taking the guess density cumulant
         and performing orbital update on the first macroiteration (for ALOGRITHM = TWOSTEP only) !expert-*/
         options.add_bool("RELAX_GUESS_ORBITALS", false);
-        /*- Controls whether to include the coupling terms in the DCFT electronic Hessian (for ALOGRITHM = QC
+        /*- Controls whether to include the coupling terms in the DCT electronic Hessian (for ALOGRITHM = QC
         with QC_TYPE = SIMULTANEOUS only) -*/
         options.add_bool("QC_COUPLING", false);
-        /*- Performs stability analysis of the DCFT energy !expert-*/
+        /*- Performs stability analysis of the DCT energy !expert-*/
         options.add_bool("STABILITY_CHECK", false);
         /*- The value of the rms of the residual in Schmidt orthogonalization which is used as a threshold
             for augmenting the vector subspace in stability check !expert-*/
@@ -1153,8 +1185,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_int("STABILITY_MAX_SPACE_SIZE", 200);
         /*- Controls whether to relax tau during the cumulant updates or not !expert-*/
         options.add_bool("RELAX_TAU", true);
-        /*- Chooses appropriate DCFT method -*/
-        options.add_str("DCFT_FUNCTIONAL", "ODC-12", "DC-06 DC-12 ODC-06 ODC-12 ODC-13 CEPA0");
+        /*- Chooses appropriate DCT method -*/
+        options.add_str("DCT_FUNCTIONAL", "ODC-12", "DC-06 DC-12 ODC-06 ODC-12 ODC-13 CEPA0");
         /*- Whether to compute three-particle energy correction or not -*/
         options.add_str("THREE_PARTICLE", "NONE", "NONE PERTURBATIVE");
         /*- Do write a MOLDEN output file?  If so, the filename will end in
@@ -1163,13 +1195,13 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         the current molecule. -*/
         options.add_bool("MOLDEN_WRITE", false);
         /*- Level shift applied to the diagonal of the density-weighted Fock operator. While this shift can improve
-           convergence, it does change the DCFT energy. !expert-*/
+           convergence, it does change the DCT energy. !expert-*/
         options.add_double("ENERGY_LEVEL_SHIFT", 0.0);
-        /*- What algorithm to use for the DCFT computation -*/
-        options.add_str("DCFT_TYPE", "CONV", "CONV DF");
-        /*- Auxiliary basis set for DCFT density fitting computations.
+        /*- What algorithm to use for the DCT computation -*/
+        options.add_str("DCT_TYPE", "CONV", "CONV DF");
+        /*- Auxiliary basis set for DCT density fitting computations.
         :ref:`Defaults <apdx:basisFamily>` to a RI basis. -*/
-        options.add_str("DF_BASIS_DCFT", "");
+        options.add_str("DF_BASIS_DCT", "");
     }
     if (name == "GDMA" || options.read_globals()) {
         /*- MODULEDESCRIPTION Performs distributed multipole analysis (DMA), using
@@ -1248,8 +1280,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         options.add_double("INTS_TOLERANCE", 0.0);
         /*- The type of guess orbitals.  Defaults to ``READ`` for geometry optimizations after the first step, to
           ``CORE`` for single atoms, and to ``SAD`` otherwise. The ``HUCKEL`` guess employs on-the-fly calculations
-          like SAD, as described in doi:10.1021/acs.jctc.8b01089. -*/
-        options.add_str("GUESS", "AUTO", "AUTO CORE GWH SAD HUCKEL READ");
+          like SAD, as described in doi:10.1021/acs.jctc.8b01089 which also describes the SAP guess. -*/
+        options.add_str("GUESS", "AUTO", "AUTO CORE GWH SAD SADNO SAP HUCKEL READ");
         /*- Mix the HOMO/LUMO in UHF or UKS to break alpha/beta spatial symmetry.
         Useful to produce broken-symmetry unrestricted solutions.
         Notice that this procedure is defined only for calculations in C1 symmetry. -*/

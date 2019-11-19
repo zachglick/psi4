@@ -53,6 +53,7 @@ from . import empirical_dispersion
 from . import dft
 from . import mcscf
 from . import response
+from . import solvent
 
 
 # ATTN NEW ADDITIONS!
@@ -1070,7 +1071,7 @@ def scf_wavefunction_factory(name, ref_wfn, reference, **kwargs):
         wfn.set_basisset("BASIS_RELATIVISTIC", decon_basis)
 
     # Set the multitude of SAD basis sets
-    if (core.get_option("SCF", "GUESS") == "SAD" or core.get_option("SCF", "GUESS") == "HUCKEL"):
+    if (core.get_option("SCF", "GUESS") in ["SAD", "SADNO", "HUCKEL"]):
         sad_basis_list = core.BasisSet.build(wfn.molecule(), "ORBITAL",
                                              core.get_global_option("BASIS"),
                                              puream=wfn.basisset().has_puream(),
@@ -1366,12 +1367,30 @@ def scf_helper(name, post_scf=True, **kwargs):
 
     # PCM preparation
     if core.get_option('SCF', 'PCM'):
+        if core.get_option('SCF', 'PE'):
+            raise ValidationError("""Error: 3-layer QM/MM/PCM not implemented.\n""")
         pcmsolver_parsed_fname = core.get_local_option('PCM', 'PCMSOLVER_PARSED_FNAME')
         pcm_print_level = core.get_option('SCF', "PRINT")
         scf_wfn.set_PCM(core.PCM(pcmsolver_parsed_fname, pcm_print_level, scf_wfn.basisset()))
         core.print_out("""  PCM does not make use of molecular symmetry: """
                        """further calculations in C1 point group.\n""")
         use_c1 = True
+
+    # PE preparation
+    if core.get_option('SCF', 'PE'):
+        if not solvent._have_pe:
+            raise ValidationError("Could not find cppe module.")
+        use_c1 = True
+        core.print_out("""  PE does not make use of molecular symmetry: """
+                       """further calculations in C1 point group.\n""")
+        # PE needs information about molecule and basis set
+        pol_embed_options = solvent.pol_embed.get_pe_options()
+        core.print_out(""" Using potential file {} for Polarizable Embedding
+                       calculation.\n""".format(pol_embed_options.potfile))
+        scf_wfn.pe_state = solvent.pol_embed.CppeInterface(
+            molecule=scf_molecule, options=pol_embed_options,
+            basisset=scf_wfn.basisset()
+        )
 
     e_scf = scf_wfn.compute_energy()
     for obj in [core, scf_wfn]:
@@ -1454,45 +1473,45 @@ def scf_helper(name, post_scf=True, **kwargs):
         return tmp
 
 
-def run_dcft(name, **kwargs):
+def run_dct(name, **kwargs):
     """Function encoding sequence of PSI module calls for
-    a density cumulant functional theory calculation.
+    a density cumulant theory calculation.
 
     """
 
     if (core.get_global_option('FREEZE_CORE') == 'TRUE'):
-        raise ValidationError('Frozen core is not available for DCFT.')
+        raise ValidationError('Frozen core is not available for DCT.')
 
     # Bypass the scf call if a reference wavefunction is given
     ref_wfn = kwargs.get('ref_wfn', None)
     if ref_wfn is None:
         ref_wfn = scf_helper(name, **kwargs)
 
-    if (core.get_global_option("DCFT_TYPE") == "DF"):
-        core.print_out("  Constructing Basis Sets for DCFT...\n\n")
-        aux_basis = core.BasisSet.build(ref_wfn.molecule(), "DF_BASIS_DCFT",
-                                        core.get_global_option("DF_BASIS_DCFT"),
+    if (core.get_global_option("DCT_TYPE") == "DF"):
+        core.print_out("  Constructing Basis Sets for DCT...\n\n")
+        aux_basis = core.BasisSet.build(ref_wfn.molecule(), "DF_BASIS_DCT",
+                                        core.get_global_option("DF_BASIS_DCT"),
                                         "RIFIT", core.get_global_option("BASIS"))
-        ref_wfn.set_basisset("DF_BASIS_DCFT", aux_basis)
+        ref_wfn.set_basisset("DF_BASIS_DCT", aux_basis)
 
         scf_aux_basis = core.BasisSet.build(ref_wfn.molecule(), "DF_BASIS_SCF",
                                             core.get_option("SCF", "DF_BASIS_SCF"),
                                             "JKFIT", core.get_global_option('BASIS'),
                                             puream=ref_wfn.basisset().has_puream())
         ref_wfn.set_basisset("DF_BASIS_SCF", scf_aux_basis)
-        dcft_wfn = core.dcft(ref_wfn)
+        dct_wfn = core.dct(ref_wfn)
 
     else:
-        # Ensure IWL files have been written for non DF-DCFT
+        # Ensure IWL files have been written for non DF-DCT
         proc_util.check_iwl_file_from_scf_type(core.get_global_option('SCF_TYPE'), ref_wfn)
-        dcft_wfn = core.dcft(ref_wfn)
+        dct_wfn = core.dct(ref_wfn)
 
-    return dcft_wfn
+    return dct_wfn
 
 
-def run_dcft_gradient(name, **kwargs):
+def run_dct_gradient(name, **kwargs):
     """Function encoding sequence of PSI module calls for
-    DCFT gradient calculation.
+    DCT gradient calculation.
 
     """
     optstash = p4util.OptionsState(
@@ -1500,16 +1519,16 @@ def run_dcft_gradient(name, **kwargs):
 
 
     core.set_global_option('DERTYPE', 'FIRST')
-    dcft_wfn = run_dcft(name, **kwargs)
+    dct_wfn = run_dct(name, **kwargs)
 
-    derivobj = core.Deriv(dcft_wfn)
+    derivobj = core.Deriv(dct_wfn)
     derivobj.set_tpdm_presorted(True)
     grad = derivobj.compute()
 
-    dcft_wfn.set_gradient(grad)
+    dct_wfn.set_gradient(grad)
 
     optstash.restore()
-    return dcft_wfn
+    return dct_wfn
 
 
 def run_dfocc(name, **kwargs):
@@ -2218,7 +2237,7 @@ def run_scf_hessian(name, **kwargs):
     if ref_wfn is None:
         ref_wfn = run_scf(name, **kwargs)
 
-    badref = core.get_option('SCF', 'REFERENCE') in ['UHF', 'ROHF', 'CUHF', 'RKS', 'UKS']
+    badref = core.get_option('SCF', 'REFERENCE') in ['UHF', 'ROHF', 'CUHF', 'UKS']
     badint = core.get_global_option('SCF_TYPE') in [ 'CD', 'OUT_OF_CORE']
     if badref or badint:
         raise ValidationError("Only RHF Hessians are currently implemented. SCF_TYPE either CD or OUT_OF_CORE not supported")
@@ -2406,6 +2425,8 @@ def run_ccenergy(name, **kwargs):
 
 
     ccwfn = core.ccenergy(ref_wfn)
+    if core.get_global_option('PE'):
+        ccwfn.pe_state = ref_wfn.pe_state
 
     if name == 'ccsd(at)':
         core.cchbar(ref_wfn)

@@ -443,15 +443,38 @@ SAD [:term:`Default <GUESS (SCF)>`]
     performed. If orbitals are needed (*e.g.*, in density fitting), a partial
     Cholesky factorization of the density matrices is used. Often extremely
     accurate, particularly for closed-shell systems.
-GWH [:term:`Default <GUESS (SCF)>`]
-    Generalized Wolfsberg-Helmholtz, a simple H\ |u_dots|\ ckel-Theory-like method based on
-    the overlap and core Hamiltonian matrices. May be useful in open-shell systems.
+SADNO
+    Natural orbitals from Superposition of Atomic Densities. Similar
+    to the above, but it forms natural orbitals from the SAD density
+    matrix to get proper orbitals which are used to start the
+    calculation, see [Lehtola:2019:1593].
+GWH
+    A generalized Wolfsberg-Helmholtz modification of the core
+    Hamiltonian matrix. May be useful in open-shell systems, but is
+    often less accurate than the core guess (see
+    [Lehtola:2019:1593]).
+HUCKEL
+    An extended Hückel guess based on on-the-fly atomic UHF
+    calculations alike SAD, see [Lehtola:2019:1593].
 READ
-    Read the previous orbitals from a checkpoint file, casting from one basis to
-    another if needed. Useful for starting anion computations from neutral
-    orbitals, or after small geometry changes. At present, casting from a
-    different molecular point group is not supported.  This becomes the
-    default for the second and later iterations of geometry optimizations.
+    Read the previous orbitals from a checkpoint file, casting from
+    one basis to another if needed. Useful for starting anion
+    computations from neutral orbitals, or after small geometry
+    changes. At present, casting from a different molecular point
+    group is not supported.  This becomes the default for the second
+    and later iterations of geometry optimizations.
+SAP
+    Superposition of Atomic Potentials. This is essentially a
+    modification of the core Hamiltonian, which includes screening
+    effects by using a radially screened effective atomic charge. The
+    screening effects have been calculated at the complete basis set
+    limit with finite-element calculations, see [Lehtola:2019:25945]
+    and [Lehtola:2019:02528]. The guess and its implementation have
+    been described in [Lehtola:2019:1593]. The guess is evaluated on a
+    DFT quadrature grid, so the guess energy depends slightly on the
+    used DFT quadrature. The current implementation is based on
+    exchange-only local density calculations that are but nanohartree
+    away from the complete basis set limit [Lehtola:2019:02528].
 
 These are all set by the |scf__guess| keyword. Also, an automatic Python
 procedure has been developed for converging the SCF in a small basis, and then
@@ -924,4 +947,3 @@ The "best-practice" input file for HF is::
     }
 
     energy('scf')
-

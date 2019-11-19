@@ -32,10 +32,9 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 #    - BLAS/LAPACK (also runtime; e.g., `conda install mkl-devel`)
 #    - Python (also runtime; interpreter and headers; e.g., `conda install python`)
 #    - NumPy (also runtime; avoidable at buildtime if gau2grid pre-built; e.g., `conda install numpy`)
-#    - deepdiff (runtime only; e.g., `conda install deepdiff -c conda-forge`)
-#    - networkx (runtime only; e.g., `conda install networkx`)
+#    - networkx >=2.4 (runtime only; e.g., `conda install networkx`)
 #    - pint (runtime only; e.g., `conda install pint -c conda-forge`)
-#    - pydantic (runtime only; e.g., `conda install pydantic -c conda-forge`)
+#    - pydantic >=1.0 (runtime only; e.g., `conda install pydantic -c conda-forge`)
 
 #  These three "###  Options  ###" sections contain useful CMake variables for build configuration.
 
@@ -87,6 +86,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 ############################  Options: Build What?  ############################
 option(ENABLE_ambit "Enables the ambit tensor library" OFF)
 option(ENABLE_CheMPS2 "Enables CheMPS2 for DMRG (requires HDF5)" OFF)
+option(ENABLE_cppe "Enables CPPE for Polarizable Embedding" OFF)
 option(ENABLE_dkh "Enables DKH integrals (requires Fortran)" OFF)
 option(ENABLE_libefp "Enables LIBEFP and PylibEFP for fragments" OFF)
 option(ENABLE_erd "Enables use of ERD instead of Libint (requires Fortran)" OFF)
@@ -185,6 +185,7 @@ ExternalProject_Add(psi4-core
            hdf5_external
            ambit_external
            chemps2_external
+           cppe_external
            dkh_external
            libefp_external
            erd_external
@@ -225,6 +226,7 @@ ExternalProject_Add(psi4-core
               -DENABLE_CheMPS2=${ENABLE_CheMPS2}
               -DENABLE_dkh=${ENABLE_dkh}
               -DENABLE_libefp=${ENABLE_libefp}
+              -DENABLE_cppe=${ENABLE_cppe}
               -DENABLE_erd=${ENABLE_erd}
               -DENABLE_simint=${ENABLE_simint}
               -DENABLE_gdma=${ENABLE_gdma}
@@ -236,6 +238,7 @@ ExternalProject_Add(psi4-core
               -DCheMPS2_DIR=${CheMPS2_DIR}
               -Ddkh_DIR=${dkh_DIR}
               -Dlibefp_DIR=${libefp_DIR}
+              -Dcppe_DIR=${cppe_DIR}
               -Derd_DIR=${erd_DIR}
               -Dgau2grid_DIR=${gau2grid_DIR}
               -Dgdma_DIR=${gdma_DIR}

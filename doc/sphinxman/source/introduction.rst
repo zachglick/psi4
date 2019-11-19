@@ -135,26 +135,29 @@ densities (SAD), discussed in
   and M. F. Guest, *J. Comput. Chem.* **27**, 926 (2006).
   (doi: `10.1002/jcc.20393 <http://dx.doi.org/10.1002/jcc.20393>`_).
 
-|PSIfour| also features an extended Hückel guess, which employs
-on-the-fly atomic calculations alike the SAD guess. The Hückel guess
-has been described in
+|PSIfour| also features a SAD natural orbital guess, an extended
+H\ |u_dots|\ ckel guess that employs on-the-fly atomic calculations alike the SAD
+guess, as well as a superposition of atomic potentials (SAP) guess
+that is based on screening of atomic nuclei. The SAD natural orbitals,
+H\ |u_dots|\ ckel and SAP guesses have been described in
 
 * "An assessment of initial guesses for self-consistent field
   calculations. Superposition of Atomic Potentials: simple yet
-  efficient", S. Lehtola, *J. Chem. Theory Comput.* (2019)
-  (doi: `10.1021/acs.jctc.8b01089 <http://dx.doi.org/10.1021/acs.jctc.8b01089>`_).
+  efficient", S. Lehtola, *J. Chem. Theory Comput.* **15**,
+  1593 (2019) (doi: `10.1021/acs.jctc.8b01089
+  <http://dx.doi.org/10.1021/acs.jctc.8b01089>`_).
 
 
-Density Cumulant Functional Theory (DCFT)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Density Cumulant Theory (DCT)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. _`intro:dcftcitations`:
+.. _`intro:dctcitations`:
 
 |PSIfour| features several formulations of newly-developed density cumulant
-functional theory (DCFT). The theory and benchmark of this theory are
-discussed in the following papers:
+theory (DCT), also known as density cumulant functional theory (DCFT).
+The theory and benchmark of this theory are discussed in the following papers:
 
-DC-06 (also known as DCFT-06):
+DC-06 (also known as DCT-06):
 
 * "Density Cumulant Functional Theory: First Implementation and
   Benchmark Results for the DCFT-06 Model," A. C. Simmonett,
@@ -628,7 +631,7 @@ For more details, see Tables :ref:`Energy <table:energy_gen>`,
     +-------------------------+----------------+-------------------+--------------+----------------+-----------------------------+-----------+------------+
     | EFP [#f5]_              | RHF            |                   | ---          | ---            |                             |           |            |
     +-------------------------+----------------+-------------------+--------------+----------------+-----------------------------+-----------+------------+
-    | DCFT                    | RHF/UHF        | CONV/DF           | RHF/UHF      | CONV           | partially threaded          |           |            |
+    | DCT                     | RHF/UHF        | CONV/DF           | RHF/UHF      | CONV           | partially threaded          |           |            |
     +-------------------------+----------------+-------------------+--------------+----------------+-----------------------------+-----------+------------+
     | MP2 [#f10]_             | RHF/UHF/ROHF   | CONV/DF/CD        | RHF/UHF      | CONV/DF        | threaded [#f3]_             | E/G       |            |
     +-------------------------+----------------+-------------------+--------------+----------------+-----------------------------+-----------+------------+

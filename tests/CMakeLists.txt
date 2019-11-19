@@ -45,9 +45,9 @@ foreach(test_name adc1 adc2 casscf-fzc-sp casscf-semi casscf-sa-sp ao-casscf-sp 
                   cc9 cc9a cdomp2-1 cdomp2-2 cepa0-grad1 cepa0-grad2 cepa1
                   cepa2 cepa3 cepa4 cepa-module ci-multi cisd-h2o+-0 cisd-h2o+-1
                   cisd-h2o+-2 cisd-h2o-clpse cisd-opt-fd cisd-sp cisd-sp-2
-                  ci-property cubeprop cubeprop-frontier decontract dcft-grad1 dcft-grad2
-                  dcft-grad3 dcft-grad4 dcft1 dcft2 dcft3 dcft4 dcft5 dcft6
-                  dcft7 dcft8 dcft9 ao-dfcasscf-sp dfcasscf-sa-sp dfcasscf-fzc-sp dfcasscf-sp
+                  ci-property cubeprop cubeprop-frontier decontract dct-grad1 dct-grad2
+                  dct-grad3 dct-grad4 dct1 dct2 dct3 dct4 dct5 dct6
+                  dct7 dct8 dct9 dct10 ao-dfcasscf-sp dfcasscf-sa-sp dfcasscf-fzc-sp dfcasscf-sp
                   dfccd1 dfccdl1 dfccd-grad1 dfccsd1 dfccsdl1 dfccsd-grad1 dfccsd-t-grad1
                   dfccsdt1 dfccsdat1 dfmp2-1 dfmp2-2 dfmp2-3 dfmp2-4 dfmp2-ecp dfmp2-fc dfmp2-grad1
                   dfmp2-grad2 dfmp2-grad3 dfmp2-grad4 dfmp2-grad5 dfomp2-1 dfomp2-2 dfomp2-3
@@ -55,7 +55,7 @@ foreach(test_name adc1 adc2 casscf-fzc-sp casscf-semi casscf-sa-sp ao-casscf-sp 
                   dfomp3-grad1 dfomp3-grad2 dfomp2p5-1 dfomp2p5-2 dfomp2p5-grad1
                   dft-grad-lr1 dft-grad-lr2 dft-grad-lr3 dft-grad-disk
                   dfomp2p5-grad2 dfrasscf-sp dfscf-bz2 dft-b2plyp dft-grac dft-ghost dft-grad-meta
-                  dft-freq dft-grad1 dft-grad2 dft-psivar dft-b3lyp dft1 dft-vv10
+                  dft-freq dft-freq-analytic dft-grad1 dft-grad2 dft-psivar dft-b3lyp dft1 dft-vv10
                   dft1-alt dft2 dft3 dft-omega docs-bases docs-dft extern1 extern2
                   fsapt1 fsapt2 fsapt-terms fsapt-allterms fsapt-ext isapt1 isapt2
                   fci-dipole fci-h2o fci-h2o-2 fci-h2o-fzcv fci-tdm fci-tdm-2
@@ -97,7 +97,11 @@ foreach(test_name adc1 adc2 casscf-fzc-sp casscf-semi casscf-sa-sp ao-casscf-sp 
                   options1 cubeprop-esp dft-smoke scf-hess1 scf-freq1 dft-jk scf-coverage
                   dft-custom-dhdf dft-custom-hybrid dft-custom-mgga dft-custom-gga
                   pywrap-bfs pywrap-align pywrap-align-chiral mints12 cc-module
-                  basis-ecp dft-pruning
+                  basis-ecp dft-pruning weird-basis-01 weird-basis-02
+                  weird-basis-03 weird-basis-04 weird-basis-05
+                  weird-basis-06 weird-basis-07 weird-basis-08
+                  weird-basis-09 weird-basis-10 weird-basis-11
+                  weird-basis-12
 )
     # Some tests fail in python 3
     if("${PYTHON_VERSION_MAJOR}" VERSION_EQUAL "3")
@@ -157,6 +161,13 @@ endif()
 if(ENABLE_CheMPS2)
     add_subdirectory(chemps2)
     message(STATUS "Adding test cases: Psi4 + CheMPS2")
+endif()
+
+# <<<  CPPE  >>>
+
+if(ENABLE_cppe)
+    add_subdirectory(cppe)
+    message(STATUS "Adding test cases: Psi4 + CPPE")
 endif()
 
 # <<<  DFTD3  >>>

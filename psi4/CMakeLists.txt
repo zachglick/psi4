@@ -57,7 +57,7 @@ if(MSVC)
 else()
   set(PYBIND11_CPP_STANDARD "-std=c++${CMAKE_CXX_STANDARD}")
 endif()
-find_package(pybind11 2.2.3 CONFIG REQUIRED)
+find_package(pybind11 2.3.0 CONFIG REQUIRED)
 message(STATUS "${Cyan}Using pybind11${ColourReset}: ${pybind11_INCLUDE_DIR} (version ${pybind11_VERSION} for Py${PYTHON_VERSION_STRING} and ${PYBIND11_CPP_STANDARD})")
 message(STATUS "${Cyan}Using Python ${PYTHON_VERSION_MAJOR}.${PYTHON_VERSION_MINOR}${ColourReset}: ${PYTHON_EXECUTABLE}")
 
@@ -115,7 +115,7 @@ else()
     message(STATUS "Disabled erd")
 endif()
 
-find_package(gau2grid 1.2 CONFIG REQUIRED COMPONENTS gaussian)
+find_package(gau2grid 2.0 CONFIG REQUIRED)
 get_property(_loc TARGET gau2grid::gg PROPERTY LOCATION)
 list(APPEND _addons ${_loc})
 message(STATUS "${Cyan}Using gau2grid${ColourReset}: ${_loc} (version ${gau2grid_VERSION})")
@@ -141,6 +141,15 @@ if(${ENABLE_PCMSolver})
     message(STATUS "${Cyan}Using PCMSolver${ColourReset}: ${_loc} (version ${PCMSolver_VERSION})")
 else()
     message(STATUS "Disabled PCMSolver")
+endif ()
+
+if(${ENABLE_cppe})
+    find_package(cppe 0.1.1 CONFIG REQUIRED)
+    get_property(_loc TARGET cppe::cppe PROPERTY LOCATION)
+    list(APPEND _addons ${_loc})
+    message(STATUS "${Cyan}Using cppe${ColourReset}: ${_loc} (version ${cppe_VERSION})")
+else()
+    message(STATUS "Disabled CPPE")
 endif ()
 
 if(${ENABLE_simint})
@@ -234,6 +243,7 @@ install(FILES ../tests/pytests/__init__.py
               ../tests/pytests/test_vibanalysis.py
               ../tests/pytests/test_dftd3.py
               ../tests/pytests/test_erisieve.py
+              ../tests/pytests/test_elec_fields.py
               ../tests/pytests/test_fcidump_energy.py
               ../tests/pytests/test_solvers.py
               ../tests/pytests/test_tdscf_products.py

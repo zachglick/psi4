@@ -43,7 +43,7 @@ procedures = {
         'hf'            : proc.run_scf,
         'scf'           : proc.run_scf,
         'mcscf'         : proc.run_mcscf,
-        'dcft'          : proc.run_dcft,
+        'dct'           : proc.run_dct,
         'ep2'           : proc.run_dfep2,
         'mp3'           : proc.select_mp3,
         'mp2.5'         : proc.select_mp2p5,
@@ -161,7 +161,7 @@ procedures = {
         'ccsd(t)'       : proc.select_ccsd_t__gradient,
         'mp2'           : proc.select_mp2_gradient,
         'eom-ccsd'      : proc.run_eom_cc_gradient,
-        'dcft'          : proc.run_dcft_gradient,
+        'dct'           : proc.run_dct_gradient,
         'omp2'          : proc.select_omp2_gradient,
         'omp3'          : proc.select_omp3_gradient,
         'mp3'           : proc.select_mp3_gradient,
@@ -220,7 +220,7 @@ for key in functionals:
         procedures['gradient'][key] = proc.run_scf_gradient
 
     # Hessians
-    if not ssuper.needs_xc():
+    if not ssuper.is_gga(): # N.B. this eliminates both GGA and m-GGA, as the latter contains GGA terms
         procedures['hessian'][key] = proc.run_scf_hessian
 
 # Integrate CFOUR with driver routines
