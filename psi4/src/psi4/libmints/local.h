@@ -96,7 +96,9 @@ class PSI_API Localizer {
     virtual void print_header() const = 0;
 
     /// Perform the localization algorithm
-    virtual void localize() = 0;
+    virtual void localize() {};
+
+    virtual void localize2(std::shared_ptr<BasisSet> minao) {};
 
     /// Given a Fock matrix in the original basis (usually diagonal), produce an ordered copy in the local basis, and
     /// reorder L and U
@@ -151,6 +153,52 @@ class PSI_API PMLocalizer : public Localizer {
     void print_header() const override;
 
     void localize() override;
+};
+
+class PSI_API IAOLocalizer : public Localizer {
+   protected:
+    /// Set defaults
+    void common_init();
+      
+    /// MinAO orbital baiss set
+    std::shared_ptr<BasisSet> minao_;
+
+    // => IAO Parameters <= //
+
+    /// Use ghost IAOs?
+    bool use_ghosts_;
+    /// IAO localization power (4 or 2)
+    int power_;
+    /// Metric condition for IAO
+    double condition_ = 1.0E-7;
+
+    // => IAO Data <= //
+
+    /// Map from non-ghosted to full atoms: true_atoms[ind_true] = ind_full
+    std::vector<int> true_atoms_;
+    /// Map from non-ghosted IAOs to full IAOs: true_iaos[ind_true] = ind_full
+    std::vector<int> true_iaos_;
+    /// Map from non-ghosted IAOs to non-ghosted atoms
+    std::vector<int> iaos_to_atoms_;
+
+    /// Overlap matrix in full basis
+    std::shared_ptr<Matrix> S_;
+    /// Non-ghosted IAOs in full basis
+    std::shared_ptr<Matrix> A_;
+
+
+   public:
+    IAOLocalizer(std::shared_ptr<BasisSet> primary, std::shared_ptr<Matrix> C);
+
+    ~IAOLocalizer() override;
+
+    void print_header() const override;
+
+    void localize2(std::shared_ptr<BasisSet> minao) override;
+
+    // => Accessors <= //
+
+    std::shared_ptr<Matrix> A() const { return A_; }
 };
 
 }  // Namespace psi

@@ -72,7 +72,12 @@ std::shared_ptr<Localizer> Localizer::build(const std::string& type, std::shared
     } else if (type == "PIPEK_MEZEY") {
         PMLocalizer* l = new PMLocalizer(primary, C);
         local = std::shared_ptr<Localizer>(l);
+    } else if (type == "IAO") {
+        IAOLocalizer* l = new IAOLocalizer(primary, C);
+        local = std::shared_ptr<Localizer>(l);
     } else {
+        //outfile->Printf(type);
+        //std::cout << type << std::endl;
         throw PSIEXCEPTION("Localizer: Unrecognized localization algorithm");
     }
 
@@ -549,6 +554,151 @@ void PMLocalizer::localize() {
     }
 
     U_->transpose_this();
+}
+
+
+
+
+
+
+
+
+
+
+
+IAOLocalizer::IAOLocalizer(std::shared_ptr<BasisSet> primary, std::shared_ptr<Matrix> C) : Localizer(primary, C) {
+    common_init();
+}
+IAOLocalizer::~IAOLocalizer() {}
+void IAOLocalizer::common_init() {}
+void IAOLocalizer::print_header() const {
+    outfile->Printf("  ==> Intrinsic Atomic Orbiatl Localizer <==\n\n");
+    // ZLG: I don't think IAOs have convergence or iterations
+    outfile->Printf("    Convergence = %11.3E\n", convergence_);
+    outfile->Printf("    Maxiter     = %11d\n", maxiter_);
+    outfile->Printf("\n");
+}
+void IAOLocalizer::localize2(std::shared_ptr<BasisSet> minao) {
+    minao_ = minao;
+    print_header();
+
+    // => Ghosting <= //
+
+    std::shared_ptr<Molecule> mol = minao_->molecule();
+    true_atoms_.clear();
+    true_iaos_.clear();
+    iaos_to_atoms_.clear();
+    for (int A = 0; A < mol->natom(); A++) {
+        // ZLG: I think this is for zero-ing out the other monomer in SAPT
+        //if (!use_ghosts_ && mol->Z(A) == 0.0) continue;
+        int Atrue = true_atoms_.size();
+        int nPshells = minao_->nshell_on_center(A);
+        int sPshells = minao_->shell_on_center(A, 0);
+        for (int P = sPshells; P < sPshells + nPshells; P++) {
+            int nP = minao_->shell(P).nfunction();
+            int oP = minao_->shell(P).function_index();
+            for (int p = 0; p < nP; p++) {
+                true_iaos_.push_back(p + oP);
+                iaos_to_atoms_.push_back(Atrue);
+            }
+        }
+        true_atoms_.push_back(A);
+    }
+
+    // => Overlap Integrals <= //
+
+    auto fact11 = std::make_shared<IntegralFactory>(primary_, primary_, primary_, primary_);
+    auto fact12 = std::make_shared<IntegralFactory>(primary_, minao_, primary_, minao_);
+    auto fact22 = std::make_shared<IntegralFactory>(minao_, minao_, minao_, minao_);
+
+    std::shared_ptr<OneBodyAOInt> ints11(fact11->ao_overlap());
+    std::shared_ptr<OneBodyAOInt> ints12(fact12->ao_overlap());
+    std::shared_ptr<OneBodyAOInt> ints22(fact22->ao_overlap());
+
+    auto S11 = std::make_shared<Matrix>("S11", primary_->nbf(), primary_->nbf());
+    auto S12f = std::make_shared<Matrix>("S12f", primary_->nbf(), minao_->nbf());
+    auto S22f = std::make_shared<Matrix>("S22f", minao_->nbf(), minao_->nbf());
+
+    ints11->compute(S11);
+    ints12->compute(S12f);
+    ints22->compute(S22f);
+
+    ints11.reset();
+    ints12.reset();
+    ints22.reset();
+
+    fact11.reset();
+    fact12.reset();
+    fact22.reset();
+
+    // => Ghosted Overlap Integrals <= //
+
+    auto S12 = std::make_shared<Matrix>("S12", primary_->nbf(), true_iaos_.size());
+    auto S22 = std::make_shared<Matrix>("S22", true_iaos_.size(), true_iaos_.size());
+
+    double** S12p = S12->pointer();
+    double** S12fp = S12f->pointer();
+    for (int m = 0; m < primary_->nbf(); m++) {
+        for (int p = 0; p < true_iaos_.size(); p++) {
+            S12p[m][p] = S12fp[m][true_iaos_[p]];
+        }
+    }
+
+    double** S22p = S22->pointer();
+    double** S22fp = S22f->pointer();
+    for (int p = 0; p < true_iaos_.size(); p++) {
+        for (int q = 0; q < true_iaos_.size(); q++) {
+            S22p[p][q] = S22fp[true_iaos_[p]][true_iaos_[q]];
+        }
+    }
+
+    // => Metric Inverses <= //
+
+    std::shared_ptr<Matrix> S11_m12(S11->clone());
+    std::shared_ptr<Matrix> S22_m12(S22->clone());
+    S11_m12->copy(S11);
+    S22_m12->copy(S22);
+    S11_m12->power(-1.0 / 2.0, condition_);
+    S22_m12->power(-1.0 / 2.0, condition_);
+
+    // => Tilde C <= //
+
+    std::shared_ptr<Matrix> C = C_;
+    std::shared_ptr<Matrix> T1 = linalg::doublet(S22_m12, S12, false, true);
+    std::shared_ptr<Matrix> T2 = linalg::doublet(S11_m12, linalg::triplet(T1, T1, C, true, false, false), false, false);
+    std::shared_ptr<Matrix> T3 = linalg::doublet(T2, T2, true, false);
+    T3->power(-1.0 / 2.0, condition_);
+    std::shared_ptr<Matrix> Ctilde = linalg::triplet(S11_m12, T2, T3, false, false, false);
+
+    // => D and Tilde D <= //
+
+    std::shared_ptr<Matrix> D = linalg::doublet(C, C, false, true);
+    std::shared_ptr<Matrix> Dtilde = linalg::doublet(Ctilde, Ctilde, false, true);
+
+    // => A (Before Orthogonalization) <= //
+
+    std::shared_ptr<Matrix> DSDtilde = linalg::triplet(D, S11, Dtilde, false, false, false);
+    DSDtilde->scale(2.0);
+
+    std::shared_ptr<Matrix> L = linalg::doublet(S11_m12, S11_m12, false, false);  // TODO: Possibly Unstable
+    L->add(DSDtilde);
+    L->subtract(D);
+    L->subtract(Dtilde);
+
+    std::shared_ptr<Matrix> AN = linalg::doublet(L, S12, false, false);
+
+    // => A (After Orthogonalization) <= //
+
+    std::shared_ptr<Matrix> V = linalg::triplet(AN, S11, AN, true, false, false);
+    V->power(-1.0 / 2.0, condition_);
+
+    std::shared_ptr<Matrix> A = linalg::doublet(AN, V, false, false);
+
+    // => Assignment <= //
+
+    S_ = S11;
+    L_ = A;
+
 }
 
 }  // Namespace psi
