@@ -44,7 +44,6 @@
 #include "psi4/libmints/sobasis.h"
 #include "psi4/libmints/petitelist.h"
 #include "psi4/libmints/integral.h"
-#include "psi4/libmints/local.h"
 #include "psi4/libmints/sointegral_onebody.h"
 #include "psi4/libmints/sointegral_twobody.h"
 #include "psi4/libmints/mintshelper.h"
@@ -1497,6 +1496,7 @@ void export_mints(py::module& m) {
                                                       "Class containing orbital localization procedures")
         .def_static("build", localizer_with_type(&Localizer::build), "Build the localization scheme")
         .def("localize", &Localizer::localize, "Perform the localization procedure")
+        .def("localize2", &Localizer::localize2, "Perform the localization procedure", "minao"_a)
         .def_property_readonly("L", py::cpp_function(&Localizer::L), "Localized orbital coefficients")
         .def_property_readonly("U", py::cpp_function(&Localizer::U), "Orbital rotation matrix")
         .def_property_readonly("converged", py::cpp_function(&Localizer::converged),
@@ -1506,6 +1506,8 @@ void export_mints(py::module& m) {
                                                                          "Performs Boys orbital localization");
     py::class_<PMLocalizer, std::shared_ptr<PMLocalizer>, Localizer>(m, "PMLocalizer",
                                                                      "Performs Pipek-Mezey orbital localization");
+    py::class_<IAOLocalizer, std::shared_ptr<IAOLocalizer>, Localizer>(m, "IAOLocalizer",
+                                                                     "Performs intrinsic atomic orbital localization");
 
     py::class_<FCHKWriter, std::shared_ptr<FCHKWriter>>(m, "FCHKWriter",
                                                         "Extracts information from a wavefunction object, \
