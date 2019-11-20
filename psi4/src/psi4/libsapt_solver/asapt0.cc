@@ -243,6 +243,26 @@ void ASAPT0::analyze() {
     d_->set_array_variable("IndBA_AB", IndBA_AB);
     d_->set_array_variable("Disp_AB", Disp_AB);
 
+    // Atomic population is a vector
+    auto NAvec = atomic_A_->N();
+    auto NBvec = atomic_B_->N();
+
+    // We can only attach matrices to the wavefunction
+    auto NA = std::make_shared<Matrix>("Pop_A", NAvec->dim(), 1);
+    auto NB = std::make_shared<Matrix>("Pop_B", NBvec->dim(), 1);
+
+    // Copy the vectors to 1D matrices
+    for(int iA=0; iA < NAvec->dim(); ++iA) {
+        NA->set(iA, 0, NAvec->get(iA));
+    }
+
+    for(int iB=0; iB < NBvec->dim(); ++iB) {
+        NB->set(iB, 0, NBvec->get(iB));
+    }
+
+    d_->set_array_variable("Pop_A", NA);
+    d_->set_array_variable("Pop_B", NB);
+
 
     auto Elst_A  = Elst_AB->collapse(1);
     auto Elst_B  = Elst_AB->collapse(0);

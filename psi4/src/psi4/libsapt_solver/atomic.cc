@@ -66,7 +66,7 @@ std::shared_ptr<AtomicDensity> AtomicDensity::build(const std::string& type, std
         //isa->convergence_ = options.get_double("ISA_CONVERGENCE");
         isa->convergence_ = 1.0e-6;
         //isa->maxiter_ = options.get_int("ISA_MAXITER");
-        isa->maxiter_ = 400;
+        isa->maxiter_ = 1000;
         //isa->diis_ = options.get_bool("ISA_DIIS");
         isa->diis_ = false;
         //isa->diis_min_vecs_ = options.get_int("ISA_DIIS_MIN_VECS");
