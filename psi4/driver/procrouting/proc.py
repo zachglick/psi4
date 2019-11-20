@@ -3607,14 +3607,14 @@ def run_sapt(name, **kwargs):
     E_disp  = np.sum(dimer_wfn.array_variable("Disp_AB" ).np)
     E_tot   = E_elst + E_exch + E_ind + E_disp
 
-    print('Python layer summary info:')
-    print(f'  Electrostatics : {1000.0 *  E_elst:20.12f} [mEh]   {627.509 *  E_elst:20.12f} [kcal * mol^{-1}]  ')
-    print(f'  Exchange       : {1000.0 *  E_exch:20.12f} [mEh]   {627.509 *  E_exch:20.12f} [kcal * mol^{-1}]  ')
-    print(f'  Induction      : {1000.0 *   E_ind:20.12f} [mEh]   {627.509 *   E_ind:20.12f} [kcal * mol^{-1}]  ')
-    print(f'    IndAB        : {1000.0 * E_indAB:20.12f} [mEh]   {627.509 * E_indAB:20.12f} [kcal * mol^{-1}]  ')
-    print(f'    IndBA        : {1000.0 * E_indBA:20.12f} [mEh]   {627.509 * E_indBA:20.12f} [kcal * mol^{-1}]  ')
-    print(f'  Dispersion     : {1000.0 *  E_disp:20.12f} [mEh]   {627.509 *  E_disp:20.12f} [kcal * mol^{-1}]  ')
-    print(f'  Total          : {1000.0 *   E_tot:20.12f} [mEh]   {627.509 *   E_tot:20.12f} [kcal * mol^{-1}]  ')
+    #print('Python layer summary info:')
+    #print(f'  Electrostatics : {1000.0 *  E_elst:20.12f} [mEh]   {627.509 *  E_elst:20.12f} [kcal * mol^{-1}]  ')
+    #print(f'  Exchange       : {1000.0 *  E_exch:20.12f} [mEh]   {627.509 *  E_exch:20.12f} [kcal * mol^{-1}]  ')
+    #print(f'  Induction      : {1000.0 *   E_ind:20.12f} [mEh]   {627.509 *   E_ind:20.12f} [kcal * mol^{-1}]  ')
+    #print(f'    IndAB        : {1000.0 * E_indAB:20.12f} [mEh]   {627.509 * E_indAB:20.12f} [kcal * mol^{-1}]  ')
+    #print(f'    IndBA        : {1000.0 * E_indBA:20.12f} [mEh]   {627.509 * E_indBA:20.12f} [kcal * mol^{-1}]  ')
+    #print(f'  Dispersion     : {1000.0 *  E_disp:20.12f} [mEh]   {627.509 *  E_disp:20.12f} [kcal * mol^{-1}]  ')
+    #print(f'  Total          : {1000.0 *   E_tot:20.12f} [mEh]   {627.509 *   E_tot:20.12f} [kcal * mol^{-1}]  ')
 
     return dimer_wfn
 
