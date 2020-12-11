@@ -63,17 +63,16 @@ def add_midbonds(**kwargs):
     # If molecule isn't specified, get the active one
     molecule = kwargs.pop('molecule', core.get_active_molecule())
 
-    point1 = kwargs.pop('point1')
-    point2 = kwargs.pop('point2')
-    print('point1', type(point1))
-    print('point2', type(point2))
+    # If the user doesn't specify points put midbond between fragment COMs
+    point1 = kwargs.pop('point1', 'com-1')
+    point2 = kwargs.pop('point2', 'com-2')
 
     nfrag = molecule.nfragments()
     molecule_dict = molecule.to_dict()
     pprint.pprint(molecule_dict)
 
     # add to these atomic lists
-    molecule_dict['elbl'] = np.append(molecule_dict['elbl'], '_dummylabel')
+    molecule_dict['elbl'] = np.append(molecule_dict['elbl'], '_midbond')
     molecule_dict['elea'] = np.append(molecule_dict['elea'], 4)
     molecule_dict['elem'] = np.append(molecule_dict['elem'], 'He')
     molecule_dict['elez'] = np.append(molecule_dict['elez'], 2)
@@ -95,8 +94,8 @@ def add_midbonds(**kwargs):
     else:
         pass
     
+    molecule_dict['speclabel'] = False
     pprint.pprint(molecule_dict)
-    molecule_dict.pop('elbl') # TODO: debug
 
     return core.Molecule.from_arrays(**molecule_dict)
 
