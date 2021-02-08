@@ -396,6 +396,8 @@ void export_wavefunction(py::module& m) {
         .def("disp", &fisapt::FISAPT::disp, "Computes the MP2-based DispE20 and Exch-DispE20 energy.")
         .def("sinf_disp", &fisapt::FISAPT::sinf_disp,
              "Computes the MP2-based DispE20 and Exch-DispE20 energy without S^2.")
+        .def("local_disp", &fisapt::FISAPT::local_disp,
+             "Computes the MP2-based DispE20 and Exch-DispE20 energy using local approximations.")
         .def("flocalize", &fisapt::FISAPT::flocalize, "F-SAPT0 localize.")
         .def("felst", &fisapt::FISAPT::felst, "F-SAPT0 electrostatics.")
         .def("fexch", &fisapt::FISAPT::fexch, "F-SAPT0 exchange.")
