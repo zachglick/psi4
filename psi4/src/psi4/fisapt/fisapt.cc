@@ -3430,6 +3430,9 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
     }
 
     std::vector<SharedMatrix> Qar(naux), Qbs(naux);
+    std::vector<SharedMatrix> Qas(naux), Qbr(naux);
+    std::vector<SharedMatrix> Qaa(naux), Qbb(naux);
+    std::vector<SharedMatrix> Qab(naux);
 
 #pragma omp parallel for schedule(static, 1)
     for (int Q = 0; Q < auxiliary->nshell(); Q++) {
@@ -3459,6 +3462,11 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 //            qia[qstart + q] = std::make_shared<Matrix>("(mn|Q)", bf_map1.size(), bf_map2.size());
             Qar[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
             Qbs[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
+            Qas[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
+            Qbr[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
+            Qaa[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
+            Qbb[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
+            Qab[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
         }
 
         for (int M = 0; M < primary_->nshell(); M++) {
@@ -3489,6 +3497,11 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 //                            qia[qstart + q]->set(bf_map1_inv[mstart + m], bf_map2_inv[nstart + n], buffer[index]);
                             Qar[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
                             Qbs[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
+                            Qas[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
+                            Qbr[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
+                            Qaa[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
+                            Qbb[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
+                            Qab[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
                         }
                     }
                 }
@@ -3527,6 +3540,11 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
             //Qbs[qstart + q] = linalg::triplet(CB_lmo, Qbs[qstart + q], CB_pao, true, false, false);
             Qar[qstart + q] = linalg::triplet(CA_lmo, Qar[qstart + q], CA_vir, true, false, false);
             Qbs[qstart + q] = linalg::triplet(CB_lmo, Qbs[qstart + q], CB_vir, true, false, false);
+            Qas[qstart + q] = linalg::triplet(CA_lmo, Qas[qstart + q], CB_vir, true, false, false);
+            Qbr[qstart + q] = linalg::triplet(CB_lmo, Qbr[qstart + q], CA_vir, true, false, false);
+            Qaa[qstart + q] = linalg::triplet(CA_lmo, Qaa[qstart + q], CA_lmo, true, false, false);
+            Qbb[qstart + q] = linalg::triplet(CB_lmo, Qbb[qstart + q], CB_lmo, true, false, false);
+            Qab[qstart + q] = linalg::triplet(CA_lmo, Qab[qstart + q], CB_lmo, true, false, false);
         }
 
     }  // Q loop
@@ -3605,17 +3623,6 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
                 t_abrs[ab]->set(r, s, -1.0 * v_abrs[ab]->get(r,s) / denom);
             }
         }
-        //t_abrs[ab]->apply_denominator(e_abrs[ab]);
-        //t_abrs[ab]->scale(-1.0);
-        //
-
-        //outfile->Printf("      Energy: %.8f\n", disp_ab * 627.509);
-
-//        tt_abrs[ab] = t_abrs[ab]->clone();
-//        tt_abrs[ab]->scale(2.0);
-//        tt_abrs[ab]->subtract(t_abrs[ab]->transpose());
-
-//        auto v_aa = linalg::doublet(Jar_a, Qar_a, true, false);
 
     }
     FA_lmo->print_out();
@@ -3680,7 +3687,491 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 
 
 
+    double e_exchdisp = 0.0;
 
+    timer_on("ExchDisp");
+
+    for(int ab = 0; ab < npair; ab++) {
+        int a, b;
+        std::tie(a, b) = ab_to_a_b[ab];
+
+        timer_on("Overlap");
+        auto S_as = linalg::triplet(CA_lmo, S, CB_vir, true, false, false); // na x ns
+        auto S_br = linalg::triplet(CB_lmo, S, CA_vir, true, false, false); // na x ns
+
+        auto S_ab = linalg::triplet(CA_lmo, S, CB_lmo, true, false, false); // na x ns
+        auto S_rs = linalg::triplet(CA_vir, S, CB_vir, true, false, false); // na x ns
+
+        auto VA_bs = linalg::triplet(CB_lmo, V_A, CB_vir, true, false, false);
+        auto VB_ar = linalg::triplet(CA_lmo, V_B, CA_vir, true, false, false);
+        timer_off("Overlap");
+
+        timer_on("Copying");
+        auto Qas_a = std::make_shared<Matrix>("3II slive", naux, ns);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t s = 0; s < ns; s++) {
+                Qas_a->set(q, s, Qas[q]->get(a,s));
+            }
+        }
+
+        auto Qax_a = std::make_shared<Matrix>("3II slive", naux, na);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t x = 0; x < na; x++) {
+                Qax_a->set(q, x, Qaa[q]->get(a,x));
+            }
+        }
+
+        auto Qay_a = std::make_shared<Matrix>("3II slive", naux, nb);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t y = 0; y < nb; y++) {
+                Qay_a->set(q, y, Qab[q]->get(a,y));
+            }
+        }
+
+        auto Qar_a = std::make_shared<Matrix>("3II slive", naux, nr);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t r = 0; r < nr; r++) {
+                Qar_a->set(q, r, Qar[q]->get(a,r));
+            }
+        }
+
+        auto Qby_b = std::make_shared<Matrix>("3II slive", naux, nb);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t y = 0; y < nb; y++) {
+                Qby_b->set(q, y, Qbb[q]->get(b,y));
+            }
+        }
+
+        auto Qbs_b = std::make_shared<Matrix>("3II slive", naux, ns);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t s = 0; s < ns; s++) {
+                Qbs_b->set(q, s, Qbs[q]->get(b,s));
+            }
+        }
+
+        auto Qbr_b = std::make_shared<Matrix>("3II slive", naux, nr);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t r = 0; r < nr; r++) {
+                Qbr_b->set(q, r, Qbr[q]->get(b,r));
+            }
+        }
+
+        auto Qxx = std::make_shared<Matrix>("3II slice", naux, na);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t x = 0; x < na; x++) {
+                Qxx->set(q, x, Qaa[q]->get(x,x));
+            }
+        }
+
+        auto Qyy = std::make_shared<Matrix>("3II slice", naux, nb);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t y = 0; y < nb; y++) {
+                Qyy->set(q, y, Qbb[q]->get(y,y));
+            }
+        }
+
+        auto Qxb_b = std::make_shared<Matrix>("3II slice", naux, na);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t x = 0; x < na; x++) {
+                Qxb_b->set(q, x, Qab[q]->get(x,b));
+            }
+        }
+
+        auto Qya_a = std::make_shared<Matrix>("3II slice", naux, nb);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t y = 0; y < nb; y++) {
+                Qya_a->set(q, y, Qab[q]->get(a,y));
+            }
+        }
+        timer_off("Copying");
+
+
+        timer_on("Inverting");
+        auto local_met = met->clone();
+        auto Jas_a = Qas_a->clone();
+        C_DGESV_wrapper(local_met, Jas_a);
+
+        local_met = met->clone();
+        auto Jxx = Qxx->clone();
+        C_DGESV_wrapper(local_met, Jxx);
+
+        local_met = met->clone();
+        auto Jyy = Qyy->clone();
+        C_DGESV_wrapper(local_met, Jyy);
+
+        local_met = met->clone();
+        auto Jxb_b = Qxb_b->clone();
+        C_DGESV_wrapper(local_met, Jxb_b);
+
+        local_met = met->clone();
+        auto Jya_a = Qya_a->clone();
+        C_DGESV_wrapper(local_met, Jya_a);
+
+        local_met = met->clone();
+        auto Jby_b = Qby_b->clone();
+        C_DGESV_wrapper(local_met, Jby_b);
+
+        local_met = met->clone();
+        auto Jax_a = Qax_a->clone();
+        C_DGESV_wrapper(local_met, Jax_a);
+
+        local_met = met->clone();
+        auto Jay_a = Qay_a->clone();
+        C_DGESV_wrapper(local_met, Jay_a);
+
+        local_met = met->clone();
+        auto Jar_a = Qar_a->clone();
+        C_DGESV_wrapper(local_met, Jar_a);
+        timer_off("Inverting");
+
+        auto vab_sr = linalg::doublet(Jas_a, Qbr_b, true, false);
+
+        // part 2
+
+        auto temp = linalg::doublet(Jxx, Qbr_b, true, false); // na x nr
+        temp = temp->collapse(0); // nr x 1
+        temp->scale(2.0);
+
+        SharedMatrix temp2;
+        for(size_t r = 0; r < nr; r++) {
+            temp2 = std::make_shared<Matrix>("blah", naux, na);
+            for(size_t q = 0; q < naux; q++) {
+                for(size_t x = 0; x < na; x++) {
+                    temp2->set(q, x, Qar[q]->get(x, r));
+                }
+            }
+            temp->add(r, 0, -1.0 * temp2->vector_dot(Jxb_b));
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, S_as->get(a, s) * temp->get(r, 0));
+            }
+        }
+
+        temp = linalg::doublet(Jxb_b, Qar_a, true, false); // na x nr
+        temp2 = linalg::doublet(Jax_a, Qbr_b, true, false); // na x nr
+        temp->scale(2.0);
+        temp->subtract(temp2);
+        temp = linalg::doublet(S_as, temp, true, false);
+        vab_sr->add(temp);
+
+        // part 3
+        
+        temp = linalg::doublet(Jyy, Qas_a, true, false); // nb x ns
+        temp = temp->collapse(0); // ns x 1
+        temp->scale(2.0);
+
+        for(size_t s = 0; s < ns; s++) {
+            temp2 = std::make_shared<Matrix>("blah", naux, nb);
+            for(size_t q = 0; q < naux; q++) {
+                for(size_t y = 0; y < nb; y++) {
+                    temp2->set(q, y, Qbs[q]->get(y, s));
+                }
+            }
+            temp->add(s, 0, -1.0 * temp2->vector_dot(Jya_a));
+            for(size_t r = 0; r < nr; r++) {
+                vab_sr->add(s, r, S_br->get(b, r) * temp->get(s, 0));
+            }
+        }
+
+        temp = linalg::doublet(Jay_a, Qbs_b, true, false); // nb x ns
+        temp2 = linalg::doublet(Jby_b, Qas_a, true, false); // nb x ns
+        temp->scale(2.0);
+        temp->subtract(temp2);
+        temp = linalg::doublet(S_br, temp, true, false);
+        vab_sr->add(temp->transpose());
+
+        // part 4
+
+        temp = linalg::triplet(S_ab, Jax_a, Qbs_b, true, true, false); // nb x ns
+        temp = linalg::doublet(S_br, temp, true, false); // nr x ns
+        temp->scale(-2.0);
+
+        SharedMatrix temp3;
+        temp2 = linalg::doublet(S_ab, Jax_a, true, true); // (nb x na) x (na x naux)
+        for(size_t s = 0; s < ns; s++) {
+            temp3 = std::make_shared<Matrix>("blah", nb, naux);
+            for(int y = 0; y < nb; y++) {
+                for(int q = 0; q < naux; q++) {
+                    temp3->set(y, q, Qbs[q]->get(y, s));
+                }
+            }
+            double temp_scalar = temp2->vector_dot(temp3);
+            for(size_t r = 0; r < nr; r++) {
+                temp->add(r, s, +1.0 * S_br->get(b, r) * temp_scalar);
+            }
+        }
+
+        vab_sr->add(temp->transpose());
+
+        auto Jx = Jxx->collapse(1); // naux x na -> naux x 1
+
+        for(size_t s = 0; s < ns; s++) {
+            double temp_scalar = 0.0;
+            for(int q = 0; q < naux; q++) {
+                for(int y = 0; y < nb; y++) {
+                    temp_scalar += Qbs[q]->get(y, s) * Jx->get(q, 0) * S_ab->get(a, y);
+                }
+            }
+            for(size_t r = 0; r < nr; r++) {
+                vab_sr->add(s, r, -2.0 * S_br->get(b, r) * temp_scalar);
+            }
+        }
+
+        temp = Qbs_b->clone(); // naux x ns
+        for(int q = 0; q < naux; q++) {
+            temp->scale_row(0, q, Jx->get(q, 0));
+        }
+        temp = temp->collapse(0);
+        temp2 = S_br->clone(); // nb x nr
+        for(int y = 0; y < nb; y++) {
+            temp2->scale_row(0, y, S_ab->get(a, y));
+        }
+        temp2 = temp2->collapse(0);
+        for(size_t s = 0; s < ns; s++) {
+            for(size_t r = 0; r < nr; r++) {
+                vab_sr->add(s, r, 4.0 * temp->get(s, 0) * temp2->get(r, 0));
+            }
+        }
+
+        // part 5
+
+        temp = linalg::doublet(Jby_b, S_ab, false, true); // (naux x nb) (nb x na)
+        for(size_t r = 0; r < nr; r++) {
+            temp2 = std::make_shared<Matrix>("", naux, na);
+            for(int q = 0; q < naux; q++) {
+                for(int x = 0; x < na; x++) {
+                    temp2->set(q, x, Qar[q]->get(x, r));
+                }
+            }
+            double temp_scalar = temp->vector_dot(temp2);
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, 1.0 * temp_scalar * S_as->get(a, s));
+            }
+        }
+
+        temp = linalg::triplet(Jar_a, Qby_b, S_ab, true, false, true); //(nr x naux) (naux x nb) (nb x na)
+        temp = linalg::doublet(S_as, temp, true, true) ; // (ns x na) (na x nr)
+        temp->scale(-2.0);
+        vab_sr->add(temp);
+
+
+
+        auto Jy = Jyy->collapse(1); // naux x nb -> naux x 1
+        for(size_t r = 0; r < nr; r++) {
+            double temp_scalar = 0.0;
+            for(int q = 0; q < naux; q++) {
+                for(int x = 0; x < na; x++) {
+                    temp_scalar += Qar[q]->get(x, r) * Jy->get(q, 0) * S_ab->get(x, b);
+                }
+            }
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, -2.0 * temp_scalar * S_as->get(a, s));
+            }
+        }
+
+        temp = Qar_a->clone(); // naux x nr
+        for(int q = 0; q < naux; q++) {
+            temp->scale_row(0, q, Jy->get(q, 0));
+        }
+        temp = temp->collapse(0); // nr x 1
+
+        temp2 = S_as->clone(); // na x ns
+        for(size_t x = 0; x < na; x++) {
+            temp2->scale_row(0, x, S_ab->get(x, b));
+        }
+        temp2 = temp2->collapse(0); // ns x 1
+
+        for(size_t r = 0; r < nr; r++) {
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, 4.0 * temp->get(r, 0) * temp2->get(s, 0));
+            }
+        }
+
+        // part 6
+        
+        temp = linalg::triplet(Jax_a, Qby_b, S_br, true, false, false); // (na x naux) (naux x nb) (nb x nr)
+        temp = linalg::doublet(S_as, temp, true, false); // (ns x na) (na x nr)
+        vab_sr->add(temp);
+
+        auto Qy = Qyy->collapse(1); // (naux x nb) -> (naux x 1)
+        temp = Jax_a->clone(); // (naux x na)
+        for(int q = 0; q < naux; q++) {
+            temp->scale_row(0, q, Qy->get(q, 0));
+        }
+        temp = temp->collapse(0); // (na x 1)
+
+        temp2 = S_as->clone();
+        for(int x = 0; x < na; x++) {
+            temp2->scale_row(0, x, temp->get(x, 0));
+        }
+        temp2 = temp2->collapse(0); // (ns x 1)
+
+        for(size_t r = 0; r < nr; r++) {
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, -2.0 * S_br->get(b, r) * temp2->get(s, 0));
+            }
+        }
+
+        temp = Jxx->clone(); // (naux x na)
+        temp = temp->collapse(1); // (naux x 1)
+        temp = linalg::triplet(temp, Qby_b, S_br, true, false, false); // (1 x naux) (naux x nb) (nb x nr)
+        for(size_t r = 0; r < nr; r++) {
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, -2.0 * S_as->get(a, s) * temp->get(0, r));
+            }
+        }
+
+        // part 7
+        
+        temp = std::make_shared<Matrix>("blah", naux, nr);
+        for(size_t x = 0; x < na; x++) {
+            temp2 = std::make_shared<Matrix>("blah", naux, nr);
+            for(size_t q = 0; q < naux; q++) {
+                for(size_t r = 0; r < nr; r++) {
+                    temp2->set(q, r, Qar[q]->get(x, r));
+                }
+            }
+            temp2->scale(S_ab->get(x, b));
+            temp->add(temp2);
+        }
+
+        local_met = met->clone();
+        C_DGESV_wrapper(local_met, temp);
+
+        temp3 = std::make_shared<Matrix>("blah", naux, ns);
+        for(size_t y = 0; y < nb; y++) {
+            temp2 = std::make_shared<Matrix>("blah", naux, ns);
+            for(size_t q = 0; q < naux; q++) {
+                for(size_t s = 0; s < ns; s++) {
+                    temp2->set(q, s, Qbs[q]->get(y, s));
+                }
+            }
+            temp2->scale(S_ab->get(a, y));
+            temp3->add(temp2);
+        }
+
+        temp = linalg::doublet(temp3, temp, true, false);
+        vab_sr->add(temp);
+
+        temp = S_ab->clone();
+        for(size_t x = 0; x < na; x++) {
+            temp->scale_row(0, x, S_ab->get(x, b));
+        }
+        temp = temp->collapse(0); // (na x nb) -> (nb, 1)
+
+        temp2 = std::make_shared<Matrix>("blah", naux, ns);
+        for(size_t y = 0; y < nb; y++) {
+            temp3 = std::make_shared<Matrix>("blah", naux, ns);
+            for(size_t q = 0; q < naux; q++) {
+                for(size_t s = 0; s < ns; s++) {
+                    temp3->set(q, s, Qbs[q]->get(y, s));
+                }
+            }
+            temp3->scale(temp->get(y, 0));
+            temp2->add(temp3);
+        }
+        temp = linalg::doublet(temp2, Jar_a, true, false);
+        temp->scale(-2.0);
+        vab_sr->add(temp);
+
+
+        temp = S_ab->clone();
+        for(size_t y = 0; y < nb; y++) {
+            temp->scale_column(0, y, S_ab->get(a, y));
+        }
+        temp = temp->collapse(1);
+        temp2 = std::make_shared<Matrix>("blah", naux, nr);
+        for(size_t x = 0; x < na; x++) {
+            temp3 = std::make_shared<Matrix>("blah", naux, nr);
+            for(size_t q = 0; q < naux; q++) {
+                for(size_t r = 0; r < nr; r++) {
+                    temp3->set(q, r, Qar[q]->get(x, r));
+                }
+            }
+            temp3->scale(temp->get(x, 0));
+            temp2->add(temp3);
+        }
+
+        local_met = met->clone();
+        C_DGESV_wrapper(local_met, temp2);
+        temp = linalg::doublet(Qbs_b, temp2, true, false);
+        temp->scale(-2.0);
+        vab_sr->add(temp);
+
+        // part 8
+
+        temp = S_br->clone();
+        for(size_t y = 0; y < nb; y++) {
+            temp->scale_row(0, y, S_ab->get(a, y));
+        }
+        temp = temp->collapse(0); // (b x r) -> (r x 1)
+        for(size_t r = 0; r < nr; r++) {
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, 2.0 * VA_bs->get(b, s) * temp->get(r, 0));
+            }
+        }
+
+        temp = S_as->clone();
+        for(size_t x = 0; x < na; x++) {
+            temp->scale_row(0, x, S_ab->get(x, b));
+        }
+        temp = temp->collapse(0); // (a x s) -> (s x 1)
+        for(size_t r = 0; r < nr; r++) {
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, 2.0 * VB_ar->get(a, r) * temp->get(s, 0));
+            }
+        }
+
+        temp = VA_bs->clone();
+        for(size_t y = 0; y < nb; y++) {
+            temp->scale_row(0, y, S_ab->get(a, y));
+        }
+        temp = temp->collapse(0); // (b x s) -> (s x 1)
+        for(size_t r = 0; r < nr; r++) {
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, -1.0 * temp->get(s, 0) * S_br->get(b, r));
+            }
+        }
+
+        temp = VB_ar->clone();
+        for(size_t x = 0; x < na; x++) {
+            temp->scale_row(0, x, S_ab->get(x, b));
+        }
+        temp = temp->collapse(0); // (a x r) -> (r x 1)
+        for(size_t r = 0; r < nr; r++) {
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, -1.0 * temp->get(r, 0) * S_as->get(a, s));
+            }
+        }
+
+        temp = S_rs->clone();
+        for(size_t z = 0; z < ns; z++) {
+            temp->scale_column(0, z, VA_bs->get(b, z));
+        }
+        temp = temp->collapse(1);
+        for(size_t r = 0; r < nr; r++) {
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, 1.0 * temp->get(r, 0) * S_as->get(a, s));
+            }
+        }
+
+        temp = S_rs->clone();
+        for(size_t z = 0; z < nr; z++) {
+            temp->scale_row(0, z, VB_ar->get(a, z));
+        }
+        temp = temp->collapse(0);
+        for(size_t r = 0; r < nr; r++) {
+            for(size_t s = 0; s < ns; s++) {
+                vab_sr->add(s, r, 1.0 * temp->get(s, 0) * S_br->get(b, r));
+            }
+        }
+
+        e_exchdisp += -2.0 * t_abrs[ab]->vector_dot(vab_sr->transpose());
+
+    }
+
+    timer_off("ExchDisp");
+
+    outfile->Printf("  !! Exch Disp: %.8f\n", e_exchdisp * 627.509);
 
 
 
