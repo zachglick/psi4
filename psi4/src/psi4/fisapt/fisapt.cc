@@ -2874,7 +2874,7 @@ std::vector<SharedMatrix> update_amps(const std::vector<SharedMatrix> &t_abrs,
     int npair = t_abrs.size();
     std::vector<SharedMatrix> t_abrs_new(npair);
 
-    outfile->Printf("  !!  update_amps(), npair=%d\n", npair);
+    //outfile->Printf("  !!  update_amps(), npair=%d\n", npair);
     for(int ab = 0; ab < npair; ab++) {
         t_abrs_new[ab] = r_abrs[ab]->clone();
         t_abrs_new[ab]->apply_denominator(e_abrs[ab]);
@@ -2893,7 +2893,7 @@ std::vector<SharedMatrix> calc_residual(const std::vector<SharedMatrix> &t_abrs,
     int npair = ab_to_a_b.size();
     int na = a_b_to_ab.size();
     int nb = a_b_to_ab[0].size();
-    outfile->Printf("  !!  calc_residual(), npair=%d, na=%d, nb=%d\n", npair, na, nb);
+    //outfile->Printf("  !!  calc_residual(), npair=%d, na=%d, nb=%d\n", npair, na, nb);
     std::vector<SharedMatrix> r_abrs(npair);
 
     for(int ab = 0; ab < npair; ab++) {
@@ -2963,8 +2963,37 @@ void C_DGESV_wrapper(SharedMatrix A, SharedMatrix B) {
     }
 }
 
+void C_DGER_wrapper(SharedMatrix A, SharedVector rowvec, SharedVector colvec, double alpha=1.0) {
+
+    int N = A->rowspi()[0];
+    int M = A->colspi()[0];
+
+    if(rowvec->dim() != N) throw PSIEXCEPTION("C_DGER dimension mismatch\n");
+    if(colvec->dim() != M) throw PSIEXCEPTION("C_DGER dimension mismatch\n");
 
 
+    //C_DGER(ns, nr, 2.0, tempv->pointer(), 1,  VA_bs->get_row(0, b)->pointer(), 1, vab_sr->get_pointer(), nr);
+    C_DGER(N, M, alpha, rowvec->pointer(), 1,  colvec->pointer(), 1, A->get_pointer(), M);
+}
+
+
+SharedVector C_DGEMV_wrapper(SharedMatrix A, SharedVector X, bool transa = false) {
+
+    int M = A->rowspi()[0];
+    int N = A->colspi()[0];
+    int xdim = transa ? M : N;
+    int ydim = transa ? N : M;
+
+    if(X->dim() != xdim) throw PSIEXCEPTION("C_DGEMV dimension mismatch\n");
+
+    SharedVector Y = std::make_shared<Vector>(X->name(), ydim);
+
+    char trans_char = (transa) ? 't' : 'n';
+    C_DGEMV(trans_char, M, N, 1.0, A->get_pointer(), N, X->pointer(), 1, 0.0, Y->pointer(), 1);
+
+    return Y;
+
+}
 
 
 // Compute total dispersion contribution
@@ -3384,8 +3413,8 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         }
     }
 
-    outfile->Printf("  !! Estimated E_disp20 : %.6f kcal / mol\n", 627.509 * e_actual_sum);
-    outfile->Printf("  !!   Upper Bound : %.6f kcal / mol\n", 627.509 * e_linear_sum);
+    outfile->Printf("  !! Estimated E_disp20 : %.6f kcal / mol\n", pc_hartree2kcalmol * e_actual_sum);
+    outfile->Printf("  !!   Upper Bound : %.6f kcal / mol\n", pc_hartree2kcalmol * e_linear_sum);
 
 
     std::vector<std::vector<int>> a_b_to_ab(na, std::vector<int>(nb, -1));
@@ -3417,7 +3446,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 
     int npair = ab_to_a_b.size();
 
-    outfile->Printf("  !! Dipole Correction: %.6f kcal / mol\n", 627.509 * de_dipole_);
+    outfile->Printf("  !! Dipole Correction: %.6f kcal / mol\n", pc_hartree2kcalmol * de_dipole_);
     outfile->Printf("  !!   Overlap Criteria: %zu / %zu pairs \n", overlap_count, naa * nab);
     outfile->Printf("  !!   Energy  Criteria: %zu / %zu pairs \n", energy_count, naa * nab);
     outfile->Printf("  !!   Combined:         %zu / %zu pairs \n", both_count, naa * nab);
@@ -3650,11 +3679,11 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 
         t_abrs = update_amps(t_abrs, e_abrs, r_abrs);
 
-        outfile->Printf("  !! Iterative Disp: %.8f %.8f\n", disp_tot * 627.509, disp_plain * 627.509);
+        outfile->Printf("  !! Iterative Disp: %.8f %.8f\n", disp_tot * pc_hartree2kcalmol, disp_plain * pc_hartree2kcalmol);
 
     }
 
-    outfile->Printf("  !! Total Disp: %.8f %.8f\n", (disp_tot + de_dipole_) * 627.509, (disp_plain + de_dipole_) * 627.509);
+    outfile->Printf("  !! Total Disp: %.8f %.8f\n", (disp_tot + de_dipole_) * pc_hartree2kcalmol, (disp_plain + de_dipole_) * pc_hartree2kcalmol);
 
 //    for(size_t a = 0; a < na; a++) {
 //        int npao_a = XA_pao_a->colspi()[0]; // number of canonical orbitals
@@ -3696,23 +3725,22 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         std::tie(a, b) = ab_to_a_b[ab];
 
         timer_on("Overlap");
+        auto S_ab = linalg::triplet(CA_lmo, S, CB_lmo, true, false, false); // na x ns
         auto S_as = linalg::triplet(CA_lmo, S, CB_vir, true, false, false); // na x ns
         auto S_br = linalg::triplet(CB_lmo, S, CA_vir, true, false, false); // na x ns
-
-        auto S_ab = linalg::triplet(CA_lmo, S, CB_lmo, true, false, false); // na x ns
         auto S_rs = linalg::triplet(CA_vir, S, CB_vir, true, false, false); // na x ns
+
+        auto S_ab_a = S_ab->get_row(0, a);
+        auto S_ab_b = S_ab->get_column(0, b);
+        auto S_as_a = S_as->get_row(0, a);
+        auto S_br_b = S_br->get_row(0, b);
+
 
         auto VA_bs = linalg::triplet(CB_lmo, V_A, CB_vir, true, false, false);
         auto VB_ar = linalg::triplet(CA_lmo, V_B, CA_vir, true, false, false);
         timer_off("Overlap");
 
         timer_on("Copying");
-        auto Qas_a = std::make_shared<Matrix>("3II slive", naux, ns);
-        for(size_t q = 0; q < naux; q++) {
-            for(size_t s = 0; s < ns; s++) {
-                Qas_a->set(q, s, Qas[q]->get(a,s));
-            }
-        }
 
         auto Qax_a = std::make_shared<Matrix>("3II slive", naux, na);
         for(size_t q = 0; q < naux; q++) {
@@ -3735,10 +3763,26 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
             }
         }
 
+        auto Qas_a = std::make_shared<Matrix>("3II slive", naux, ns);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t s = 0; s < ns; s++) {
+                Qas_a->set(q, s, Qas[q]->get(a,s));
+            }
+        }
+
+        //
+
         auto Qby_b = std::make_shared<Matrix>("3II slive", naux, nb);
         for(size_t q = 0; q < naux; q++) {
             for(size_t y = 0; y < nb; y++) {
                 Qby_b->set(q, y, Qbb[q]->get(b,y));
+            }
+        }
+
+        auto Qbr_b = std::make_shared<Matrix>("3II slive", naux, nr);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t r = 0; r < nr; r++) {
+                Qbr_b->set(q, r, Qbr[q]->get(b,r));
             }
         }
 
@@ -3749,12 +3793,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
             }
         }
 
-        auto Qbr_b = std::make_shared<Matrix>("3II slive", naux, nr);
-        for(size_t q = 0; q < naux; q++) {
-            for(size_t r = 0; r < nr; r++) {
-                Qbr_b->set(q, r, Qbr[q]->get(b,r));
-            }
-        }
+        //
 
         auto Qxx = std::make_shared<Matrix>("3II slice", naux, na);
         for(size_t q = 0; q < naux; q++) {
@@ -3770,6 +3809,8 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
             }
         }
 
+        //
+
         auto Qxb_b = std::make_shared<Matrix>("3II slice", naux, na);
         for(size_t q = 0; q < naux; q++) {
             for(size_t x = 0; x < na; x++) {
@@ -3783,8 +3824,45 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
                 Qya_a->set(q, y, Qab[q]->get(a,y));
             }
         }
+
         timer_off("Copying");
 
+        timer_on("Copying2");
+        std::vector<SharedMatrix> rQa(nr), sQb(ns);
+        std::vector<SharedMatrix> aQr(na), bQs(nb);
+        for(size_t r = 0; r < nr; r++) {
+            rQa[r] = std::make_shared<Matrix>("(ar|Q)_r", naux, na);
+            for(size_t q = 0; q < naux; q++) {
+                for(size_t x = 0; x < na; x++) {
+                    rQa[r]->set(q, x, Qar[q]->get(x, r));
+                }
+            }
+        }
+        for(size_t x = 0; x < na; x++) {
+            aQr[x] = std::make_shared<Matrix>("(ar|Q)_a", naux, nr);
+            for(size_t q = 0; q < naux; q++) {
+                for(size_t r = 0; r < nr; r++) {
+                    aQr[x]->set(q, r, Qar[q]->get(x, r));
+                }
+            }
+        }
+        for(size_t s = 0; s < ns; s++) {
+            sQb[s] = std::make_shared<Matrix>("(bs|Q)_s", naux, nb);
+            for(size_t q = 0; q < naux; q++) {
+                for(size_t y = 0; y < nb; y++) {
+                    sQb[s]->set(q, y, Qbs[q]->get(y, s));
+                }
+            }
+        }
+        for(size_t y = 0; y < nb; y++) {
+            bQs[y] = std::make_shared<Matrix>("(bs|Q)_b", naux, ns);
+            for(size_t q = 0; q < naux; q++) {
+                for(size_t s = 0; s < ns; s++) {
+                    bQs[y]->set(q, s, Qbs[q]->get(y, s));
+                }
+            }
+        }
+        timer_off("Copying2");
 
         timer_on("Inverting");
         auto local_met = met->clone();
@@ -3792,12 +3870,12 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         C_DGESV_wrapper(local_met, Jas_a);
 
         local_met = met->clone();
-        auto Jxx = Qxx->clone();
-        C_DGESV_wrapper(local_met, Jxx);
+        auto Jx = Qxx->clone()->collapse(1);
+        C_DGESV_wrapper(local_met, Jx);
 
         local_met = met->clone();
-        auto Jyy = Qyy->clone();
-        C_DGESV_wrapper(local_met, Jyy);
+        auto Jy = Qyy->clone()->collapse(1);
+        C_DGESV_wrapper(local_met, Jy);
 
         local_met = met->clone();
         auto Jxb_b = Qxb_b->clone();
@@ -3824,27 +3902,26 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         C_DGESV_wrapper(local_met, Jar_a);
         timer_off("Inverting");
 
+        SharedVector tempv, tempv2;
+        SharedMatrix temp, temp2;
+
+        auto Qy = Qyy->collapse(1); // (naux x nb) -> (naux x 1)
+
+        // part 1
+
+        timer_on("Part 1");
         auto vab_sr = linalg::doublet(Jas_a, Qbr_b, true, false);
+        timer_off("Part 1");
 
         // part 2
 
-        auto temp = linalg::doublet(Jxx, Qbr_b, true, false); // na x nr
-        temp = temp->collapse(0); // nr x 1
-        temp->scale(2.0);
-
-        SharedMatrix temp2;
+        timer_on("Part 2");
+        tempv = C_DGEMV_wrapper(Qbr_b, Jx->get_column(0,0), true);
+        tempv->scale(2.0);
         for(size_t r = 0; r < nr; r++) {
-            temp2 = std::make_shared<Matrix>("blah", naux, na);
-            for(size_t q = 0; q < naux; q++) {
-                for(size_t x = 0; x < na; x++) {
-                    temp2->set(q, x, Qar[q]->get(x, r));
-                }
-            }
-            temp->add(r, 0, -1.0 * temp2->vector_dot(Jxb_b));
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, S_as->get(a, s) * temp->get(r, 0));
-            }
+            tempv->add(r, -1.0 * rQa[r]->vector_dot(Jxb_b));
         }
+        C_DGER_wrapper(vab_sr, S_as_a, tempv, 1.0);
 
         temp = linalg::doublet(Jxb_b, Qar_a, true, false); // na x nr
         temp2 = linalg::doublet(Jax_a, Qbr_b, true, false); // na x nr
@@ -3852,25 +3929,17 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         temp->subtract(temp2);
         temp = linalg::doublet(S_as, temp, true, false);
         vab_sr->add(temp);
+        timer_off("Part 2");
 
         // part 3
         
-        temp = linalg::doublet(Jyy, Qas_a, true, false); // nb x ns
-        temp = temp->collapse(0); // ns x 1
-        temp->scale(2.0);
-
+        timer_on("Part 3");
+        tempv = C_DGEMV_wrapper(Qas_a, Jy->get_column(0,0), true);
+        tempv->scale(2.0);
         for(size_t s = 0; s < ns; s++) {
-            temp2 = std::make_shared<Matrix>("blah", naux, nb);
-            for(size_t q = 0; q < naux; q++) {
-                for(size_t y = 0; y < nb; y++) {
-                    temp2->set(q, y, Qbs[q]->get(y, s));
-                }
-            }
-            temp->add(s, 0, -1.0 * temp2->vector_dot(Jya_a));
-            for(size_t r = 0; r < nr; r++) {
-                vab_sr->add(s, r, S_br->get(b, r) * temp->get(s, 0));
-            }
+            tempv->add(s, -1.0 * sQb[s]->vector_dot(Jya_a));
         }
+        C_DGER_wrapper(vab_sr, tempv, S_br_b, 1.0);
 
         temp = linalg::doublet(Jay_a, Qbs_b, true, false); // nb x ns
         temp2 = linalg::doublet(Jby_b, Qas_a, true, false); // nb x ns
@@ -3878,292 +3947,147 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         temp->subtract(temp2);
         temp = linalg::doublet(S_br, temp, true, false);
         vab_sr->add(temp->transpose());
+        timer_off("Part 3");
 
         // part 4
+
+        timer_on("Part 4");
+        temp = linalg::doublet(Jax_a, S_ab, false, false); // (naux x na) x (na x nb)
+        tempv = std::make_shared<Vector>("", ns);
+        for(size_t s = 0; s < ns; s++) {
+            tempv->set(s, +1.0 * sQb[s]->vector_dot(temp));
+        }
+        C_DGER_wrapper(vab_sr, tempv, S_br_b, +1.0);
 
         temp = linalg::triplet(S_ab, Jax_a, Qbs_b, true, true, false); // nb x ns
         temp = linalg::doublet(S_br, temp, true, false); // nr x ns
         temp->scale(-2.0);
-
-        SharedMatrix temp3;
-        temp2 = linalg::doublet(S_ab, Jax_a, true, true); // (nb x na) x (na x naux)
-        for(size_t s = 0; s < ns; s++) {
-            temp3 = std::make_shared<Matrix>("blah", nb, naux);
-            for(int y = 0; y < nb; y++) {
-                for(int q = 0; q < naux; q++) {
-                    temp3->set(y, q, Qbs[q]->get(y, s));
-                }
-            }
-            double temp_scalar = temp2->vector_dot(temp3);
-            for(size_t r = 0; r < nr; r++) {
-                temp->add(r, s, +1.0 * S_br->get(b, r) * temp_scalar);
-            }
-        }
-
         vab_sr->add(temp->transpose());
 
-        auto Jx = Jxx->collapse(1); // naux x na -> naux x 1
-
+        tempv = std::make_shared<Vector>("", ns);
         for(size_t s = 0; s < ns; s++) {
-            double temp_scalar = 0.0;
-            for(int q = 0; q < naux; q++) {
-                for(int y = 0; y < nb; y++) {
-                    temp_scalar += Qbs[q]->get(y, s) * Jx->get(q, 0) * S_ab->get(a, y);
-                }
-            }
-            for(size_t r = 0; r < nr; r++) {
-                vab_sr->add(s, r, -2.0 * S_br->get(b, r) * temp_scalar);
-            }
+            tempv2 = C_DGEMV_wrapper(sQb[s], Jx->get_column(0, 0), true);
+            tempv->set(s, tempv2->vector_dot(S_ab_a));
         }
+        C_DGER_wrapper(vab_sr, tempv, S_br_b, -2.0);
 
-        temp = Qbs_b->clone(); // naux x ns
-        for(int q = 0; q < naux; q++) {
-            temp->scale_row(0, q, Jx->get(q, 0));
-        }
-        temp = temp->collapse(0);
-        temp2 = S_br->clone(); // nb x nr
-        for(int y = 0; y < nb; y++) {
-            temp2->scale_row(0, y, S_ab->get(a, y));
-        }
-        temp2 = temp2->collapse(0);
-        for(size_t s = 0; s < ns; s++) {
-            for(size_t r = 0; r < nr; r++) {
-                vab_sr->add(s, r, 4.0 * temp->get(s, 0) * temp2->get(r, 0));
-            }
-        }
+        tempv = C_DGEMV_wrapper(Qbs_b, Jx->get_column(0, 0), true);
+        tempv2 = C_DGEMV_wrapper(S_br, S_ab_a, true);
+        C_DGER_wrapper(vab_sr, tempv, tempv2, 4.0);
+        timer_off("Part 4");
 
         // part 5
 
+        timer_on("Part 5");
         temp = linalg::doublet(Jby_b, S_ab, false, true); // (naux x nb) (nb x na)
+        tempv = std::make_shared<Vector>("", nr);
         for(size_t r = 0; r < nr; r++) {
-            temp2 = std::make_shared<Matrix>("", naux, na);
-            for(int q = 0; q < naux; q++) {
-                for(int x = 0; x < na; x++) {
-                    temp2->set(q, x, Qar[q]->get(x, r));
-                }
-            }
-            double temp_scalar = temp->vector_dot(temp2);
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, 1.0 * temp_scalar * S_as->get(a, s));
-            }
+            tempv->set(r, +1.0 * rQa[r]->vector_dot(temp));
         }
+        C_DGER_wrapper(vab_sr, S_as_a, tempv, +1.0);
 
         temp = linalg::triplet(Jar_a, Qby_b, S_ab, true, false, true); //(nr x naux) (naux x nb) (nb x na)
         temp = linalg::doublet(S_as, temp, true, true) ; // (ns x na) (na x nr)
         temp->scale(-2.0);
         vab_sr->add(temp);
 
-
-
-        auto Jy = Jyy->collapse(1); // naux x nb -> naux x 1
+        tempv = std::make_shared<Vector>("", nr);
         for(size_t r = 0; r < nr; r++) {
-            double temp_scalar = 0.0;
-            for(int q = 0; q < naux; q++) {
-                for(int x = 0; x < na; x++) {
-                    temp_scalar += Qar[q]->get(x, r) * Jy->get(q, 0) * S_ab->get(x, b);
-                }
-            }
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, -2.0 * temp_scalar * S_as->get(a, s));
-            }
+            tempv2 = C_DGEMV_wrapper(rQa[r], Jy->get_column(0, 0), true);
+            tempv->set(r, tempv2->vector_dot(S_ab_b));
         }
+        C_DGER_wrapper(vab_sr, S_as_a, tempv, -2.0);
 
-        temp = Qar_a->clone(); // naux x nr
-        for(int q = 0; q < naux; q++) {
-            temp->scale_row(0, q, Jy->get(q, 0));
-        }
-        temp = temp->collapse(0); // nr x 1
-
-        temp2 = S_as->clone(); // na x ns
-        for(size_t x = 0; x < na; x++) {
-            temp2->scale_row(0, x, S_ab->get(x, b));
-        }
-        temp2 = temp2->collapse(0); // ns x 1
-
-        for(size_t r = 0; r < nr; r++) {
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, 4.0 * temp->get(r, 0) * temp2->get(s, 0));
-            }
-        }
+        tempv = C_DGEMV_wrapper(Qar_a, Jy->get_column(0, 0), true);
+        tempv2 = C_DGEMV_wrapper(S_as, S_ab_b, true);
+        C_DGER_wrapper(vab_sr, tempv2, tempv, 4.0);
+        timer_off("Part 5");
 
         // part 6
         
+        timer_on("Part 6");
         temp = linalg::triplet(Jax_a, Qby_b, S_br, true, false, false); // (na x naux) (naux x nb) (nb x nr)
         temp = linalg::doublet(S_as, temp, true, false); // (ns x na) (na x nr)
         vab_sr->add(temp);
 
-        auto Qy = Qyy->collapse(1); // (naux x nb) -> (naux x 1)
-        temp = Jax_a->clone(); // (naux x na)
-        for(int q = 0; q < naux; q++) {
-            temp->scale_row(0, q, Qy->get(q, 0));
-        }
-        temp = temp->collapse(0); // (na x 1)
+        tempv = C_DGEMV_wrapper(Jax_a, Qy->get_column(0, 0), true);
+        tempv = C_DGEMV_wrapper(S_as, tempv, true);
+        C_DGER_wrapper(vab_sr, tempv, S_br_b, -2.0);
 
-        temp2 = S_as->clone();
-        for(int x = 0; x < na; x++) {
-            temp2->scale_row(0, x, temp->get(x, 0));
-        }
-        temp2 = temp2->collapse(0); // (ns x 1)
-
-        for(size_t r = 0; r < nr; r++) {
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, -2.0 * S_br->get(b, r) * temp2->get(s, 0));
-            }
-        }
-
-        temp = Jxx->clone(); // (naux x na)
-        temp = temp->collapse(1); // (naux x 1)
-        temp = linalg::triplet(temp, Qby_b, S_br, true, false, false); // (1 x naux) (naux x nb) (nb x nr)
-        for(size_t r = 0; r < nr; r++) {
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, -2.0 * S_as->get(a, s) * temp->get(0, r));
-            }
-        }
+        tempv = C_DGEMV_wrapper(Qby_b, Jx->get_column(0, 0), true);
+        tempv = C_DGEMV_wrapper(S_br, tempv, true);
+        C_DGER_wrapper(vab_sr, S_as_a, tempv, -2.0);
+        timer_off("Part 6");
 
         // part 7
         
+        timer_on("Part 7");
         temp = std::make_shared<Matrix>("blah", naux, nr);
         for(size_t x = 0; x < na; x++) {
-            temp2 = std::make_shared<Matrix>("blah", naux, nr);
-            for(size_t q = 0; q < naux; q++) {
-                for(size_t r = 0; r < nr; r++) {
-                    temp2->set(q, r, Qar[q]->get(x, r));
-                }
-            }
-            temp2->scale(S_ab->get(x, b));
-            temp->add(temp2);
+            temp->axpy(S_ab->get(x, b), aQr[x]);
         }
 
+        timer_on("Inverse 1");
         local_met = met->clone();
         C_DGESV_wrapper(local_met, temp);
-
-        temp3 = std::make_shared<Matrix>("blah", naux, ns);
-        for(size_t y = 0; y < nb; y++) {
-            temp2 = std::make_shared<Matrix>("blah", naux, ns);
-            for(size_t q = 0; q < naux; q++) {
-                for(size_t s = 0; s < ns; s++) {
-                    temp2->set(q, s, Qbs[q]->get(y, s));
-                }
-            }
-            temp2->scale(S_ab->get(a, y));
-            temp3->add(temp2);
-        }
-
-        temp = linalg::doublet(temp3, temp, true, false);
-        vab_sr->add(temp);
-
-        temp = S_ab->clone();
-        for(size_t x = 0; x < na; x++) {
-            temp->scale_row(0, x, S_ab->get(x, b));
-        }
-        temp = temp->collapse(0); // (na x nb) -> (nb, 1)
+        timer_off("Inverse 1");
 
         temp2 = std::make_shared<Matrix>("blah", naux, ns);
         for(size_t y = 0; y < nb; y++) {
-            temp3 = std::make_shared<Matrix>("blah", naux, ns);
-            for(size_t q = 0; q < naux; q++) {
-                for(size_t s = 0; s < ns; s++) {
-                    temp3->set(q, s, Qbs[q]->get(y, s));
-                }
-            }
-            temp3->scale(temp->get(y, 0));
-            temp2->add(temp3);
+            temp2->axpy(S_ab->get(a, y), bQs[y]);
+        }
+
+        temp = linalg::doublet(temp2, temp, true, false);
+        vab_sr->add(temp);
+
+        tempv = C_DGEMV_wrapper(S_ab, S_ab_b, true); // (a x b).T x (a)
+        temp2 = std::make_shared<Matrix>("blah", naux, ns);
+        for(size_t y = 0; y < nb; y++) {
+            temp2->axpy(tempv->get(y), bQs[y]);
         }
         temp = linalg::doublet(temp2, Jar_a, true, false);
         temp->scale(-2.0);
         vab_sr->add(temp);
 
-
-        temp = S_ab->clone();
-        for(size_t y = 0; y < nb; y++) {
-            temp->scale_column(0, y, S_ab->get(a, y));
-        }
-        temp = temp->collapse(1);
+        tempv = C_DGEMV_wrapper(S_ab, S_ab_a, false); // (a x b) x (b)
         temp2 = std::make_shared<Matrix>("blah", naux, nr);
         for(size_t x = 0; x < na; x++) {
-            temp3 = std::make_shared<Matrix>("blah", naux, nr);
-            for(size_t q = 0; q < naux; q++) {
-                for(size_t r = 0; r < nr; r++) {
-                    temp3->set(q, r, Qar[q]->get(x, r));
-                }
-            }
-            temp3->scale(temp->get(x, 0));
-            temp2->add(temp3);
+            temp2->axpy(tempv->get(x), aQr[x]);
         }
 
+        // redo this one
+
+        timer_on("Inverse 2");
         local_met = met->clone();
         C_DGESV_wrapper(local_met, temp2);
+        timer_off("Inverse 2");
+
         temp = linalg::doublet(Qbs_b, temp2, true, false);
         temp->scale(-2.0);
         vab_sr->add(temp);
+        timer_off("Part 7");
 
         // part 8
 
-        temp = S_br->clone();
-        for(size_t y = 0; y < nb; y++) {
-            temp->scale_row(0, y, S_ab->get(a, y));
-        }
-        temp = temp->collapse(0); // (b x r) -> (r x 1)
-        for(size_t r = 0; r < nr; r++) {
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, 2.0 * VA_bs->get(b, s) * temp->get(r, 0));
-            }
-        }
+        timer_on("Part 8");
+        tempv = C_DGEMV_wrapper(S_br, S_ab_a, true); // (b x r).T x (b)
+        C_DGER_wrapper(vab_sr, VA_bs->get_row(0, b), tempv, 2.0);
 
-        temp = S_as->clone();
-        for(size_t x = 0; x < na; x++) {
-            temp->scale_row(0, x, S_ab->get(x, b));
-        }
-        temp = temp->collapse(0); // (a x s) -> (s x 1)
-        for(size_t r = 0; r < nr; r++) {
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, 2.0 * VB_ar->get(a, r) * temp->get(s, 0));
-            }
-        }
+        tempv = C_DGEMV_wrapper(S_as, S_ab_b, true);
+        C_DGER_wrapper(vab_sr, tempv, VB_ar->get_row(0, a), 2.0);
 
-        temp = VA_bs->clone();
-        for(size_t y = 0; y < nb; y++) {
-            temp->scale_row(0, y, S_ab->get(a, y));
-        }
-        temp = temp->collapse(0); // (b x s) -> (s x 1)
-        for(size_t r = 0; r < nr; r++) {
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, -1.0 * temp->get(s, 0) * S_br->get(b, r));
-            }
-        }
+        tempv = C_DGEMV_wrapper(VA_bs, S_ab_a, true);
+        C_DGER_wrapper(vab_sr, tempv, S_br_b, -1.0);
 
-        temp = VB_ar->clone();
-        for(size_t x = 0; x < na; x++) {
-            temp->scale_row(0, x, S_ab->get(x, b));
-        }
-        temp = temp->collapse(0); // (a x r) -> (r x 1)
-        for(size_t r = 0; r < nr; r++) {
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, -1.0 * temp->get(r, 0) * S_as->get(a, s));
-            }
-        }
+        tempv = C_DGEMV_wrapper(VB_ar, S_ab_b, true);
+        C_DGER_wrapper(vab_sr, S_as_a, tempv, -1.0);
 
-        temp = S_rs->clone();
-        for(size_t z = 0; z < ns; z++) {
-            temp->scale_column(0, z, VA_bs->get(b, z));
-        }
-        temp = temp->collapse(1);
-        for(size_t r = 0; r < nr; r++) {
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, 1.0 * temp->get(r, 0) * S_as->get(a, s));
-            }
-        }
+        tempv = C_DGEMV_wrapper(S_rs, VA_bs->get_row(0, b), false);
+        C_DGER_wrapper(vab_sr, S_as_a, tempv, +1.0);
 
-        temp = S_rs->clone();
-        for(size_t z = 0; z < nr; z++) {
-            temp->scale_row(0, z, VB_ar->get(a, z));
-        }
-        temp = temp->collapse(0);
-        for(size_t r = 0; r < nr; r++) {
-            for(size_t s = 0; s < ns; s++) {
-                vab_sr->add(s, r, 1.0 * temp->get(s, 0) * S_br->get(b, r));
-            }
-        }
+        tempv = C_DGEMV_wrapper(S_rs, VB_ar->get_row(0, a), true);
+        C_DGER_wrapper(vab_sr, tempv, S_br_b, +1.0);
+        timer_off("Part 8");
 
         e_exchdisp += -2.0 * t_abrs[ab]->vector_dot(vab_sr->transpose());
 
@@ -4171,24 +4095,10 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 
     timer_off("ExchDisp");
 
-    outfile->Printf("  !! Exch Disp: %.8f\n", e_exchdisp * 627.509);
-
-
-
-
-
-
-
-
-
+    outfile->Printf("  !! Exch Disp: %.8f\n", e_exchdisp * pc_hartree2kcalmol);
+    outfile->Printf("  !! Conversion Factor: %.8f\n", pc_hartree2kcalmol);
 
     return;
-
-
-
-
-
-
 
     double Disp20 = 0.0;
     double ExchDisp20 = 0.0;
