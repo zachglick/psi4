@@ -2848,6 +2848,21 @@ std::vector<int> contract_lists(const std::vector<int> &y, const std::vector<std
 
 }
 
+/* Args: orthonormal orbitals C (ao x mo) and fock matrix F (ao x ao)
+ * Return: transformation matrix X (mo x mo) and energy vector e (mo)
+ *
+ * CX are canonical orbitals (i.e. F(CX) = e(CX))
+ */
+std::pair<SharedMatrix, SharedVector> canonicalizer(SharedMatrix C, SharedMatrix F) {
+    SharedMatrix X = std::make_shared<Matrix>("eigenvectors", C->colspi(0), C->colspi(0));
+    SharedVector e = std::make_shared<Vector>("eigenvalues", C->colspi(0));
+
+    auto temp = linalg::triplet(C, F, C, true, false, false);
+    temp->diagonalize(X, e, descending);
+
+    return std::make_pair(X, e);
+}
+
 std::pair<SharedMatrix, SharedVector> orthocanonicalizer(SharedMatrix S, SharedMatrix F) {
     
     double S_CUT = 1e-8;
@@ -3047,6 +3062,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
     double T_CUT_DO_PRE = 3e-2;
     double T_CUT_DO_ij = 1e-5;
     double T_CUT_PRE = 1e-5;
+    double T_CUT_OSV = 1e-9;
 
     // => Sizing <= //
 
@@ -3463,6 +3479,12 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
     std::vector<SharedMatrix> Qaa(naux), Qbb(naux);
     std::vector<SharedMatrix> Qab(naux);
 
+    // LMO/PAO integrals
+    std::vector<SharedMatrix> Qac(naux), Qbd(naux);
+    std::vector<SharedMatrix> Qad(naux), Qbc(naux);
+
+    outfile->Printf("  !! Starting Integral Transform... \n");
+
 #pragma omp parallel for schedule(static, 1)
     for (int Q = 0; Q < auxiliary->nshell(); Q++) {
         int nq = auxiliary->shell(Q).nfunction();
@@ -3496,6 +3518,11 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
             Qaa[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
             Qbb[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
             Qab[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
+
+            Qac[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
+            Qbd[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
+            Qad[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
+            Qbc[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
         }
 
         for (int M = 0; M < primary_->nshell(); M++) {
@@ -3531,6 +3558,11 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
                             Qaa[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
                             Qbb[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
                             Qab[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
+
+                            Qac[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
+                            Qbd[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
+                            Qad[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
+                            Qbc[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
                         }
                     }
                 }
@@ -3574,24 +3606,114 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
             Qaa[qstart + q] = linalg::triplet(CA_lmo, Qaa[qstart + q], CA_lmo, true, false, false);
             Qbb[qstart + q] = linalg::triplet(CB_lmo, Qbb[qstart + q], CB_lmo, true, false, false);
             Qab[qstart + q] = linalg::triplet(CA_lmo, Qab[qstart + q], CB_lmo, true, false, false);
+
+            Qac[qstart + q] = linalg::triplet(CA_lmo, Qac[qstart + q], CA_pao, true, false, false);
+            Qbd[qstart + q] = linalg::triplet(CB_lmo, Qbd[qstart + q], CB_pao, true, false, false);
+            Qad[qstart + q] = linalg::triplet(CA_lmo, Qad[qstart + q], CB_pao, true, false, false);
+            Qbc[qstart + q] = linalg::triplet(CB_lmo, Qbc[qstart + q], CA_pao, true, false, false);
         }
 
     }  // Q loop
-
 
     // Compute the full metric, don't invert
     auto metric = std::make_shared<FittingMetric>(auxiliary, true);
     metric->form_fitting_metric();
     auto met = std::make_shared<Matrix>(metric->get_metric());
 
-    std::vector<SharedMatrix> XA_pao(na), XB_pao(nb);
-    std::vector<SharedVector> eA_pao(na), eB_pao(nb);
+    std::vector<SharedMatrix> XA_pao(na), XB_pao(nb), XA_osv(na), XB_osv(nb);
+    std::vector<SharedVector> eA_pao(na), eB_pao(nb), eA_osv(na), eB_osv(nb);
+
+    outfile->Printf("  !! Forming OSVs... \n");
 
     for(size_t a = 0; a < na; a++) {
         //SharedMatrix XA_pao[a]; // canonical transform for the PAOs of atom a
         //SharedVector eA_pao[a]; // orbital energies of above canonical orbitals
-        std::tie(XA_pao[a], eA_pao[a]) = orthocanonicalizer(SA_pao, FA_pao);
+        std::tie(XA_pao[a], eA_pao[a]) = orthocanonicalizer(SA_pao, FA_pao); // TODO: use subset of SA_pao, FA_pao
+
+        auto npao_dep_a = XA_pao[a]->rowspi()[0]; // possibly linear dependent PAOs
+        auto npao_a = XA_pao[a]->colspi()[0]; // orthocanonicalized PAOs
+
+        auto Qar_a = std::make_shared<Matrix>("3II slice", naux, npao_dep_a);
+        for(size_t q = 0; q < naux; q++) {
+            for(size_t r = 0; r < npao_dep_a; r++) {
+            //for(size_t r = 0; r < nr; r++) {
+                Qar_a->set(q, r, Qac[q]->get(a, r));
+            }
+        }
+        Qar_a = linalg::doublet(Qar_a, XA_pao[a]); // (naux x npao_pre_a) (npao_pre_a x npao_a)
+
+        auto Jar_a = Qar_a->clone();
+        auto local_met = met->clone();
+        C_DGESV_wrapper(local_met, Jar_a);
+        auto v_aa = linalg::doublet(Jar_a, Qar_a, true, false);
+
+        auto t_aa = v_aa->clone();
+        for(size_t r1 = 0; r1 < npao_a; r1++) {
+            for(size_t r2 = 0; r2 < npao_a; r2++) {
+                double denom = eA_pao[a]->get(r1) + eA_pao[a]->get(r2) - 2 * FA_lmo->get(a,a);
+                t_aa->set(r1, r2, -1.0 * t_aa->get(r1, r2) / denom);
+            }
+        }
+
+        auto tt_aa = t_aa->clone();
+        tt_aa->scale(2.0);
+        tt_aa->subtract(t_aa->transpose());
+
+        auto d_aa = linalg::doublet(tt_aa, t_aa, true, false);
+        d_aa->add(linalg::doublet(tt_aa, t_aa, false, true));
+
+        SharedMatrix XA_osv_a = std::make_shared<Matrix>("eigenvectors", npao_a, npao_a);
+        SharedVector osv_occ = std::make_shared<Vector>("eigenvalues", npao_a);
+        d_aa->diagonalize(XA_osv_a, osv_occ, descending);
+
+        int nosv_a = 0;
+        for (size_t r = 0; r < npao_a; ++r) {
+            if (fabs(osv_occ->get(r)) >= T_CUT_OSV) {
+                nosv_a ++;
+            }
+        }
+
+        outfile->Printf(" LMO %d: %4d ldPAOs -> %4d PAOS -> %d OSVs\n", a, npao_dep_a, npao_a, nosv_a);
+
+        Dimension zero = Dimension(1);
+        Dimension dim_final = Dimension(1);
+        dim_final.fill(nosv_a);
+
+        // This transformation gives orbitals that are orthonormal but not canonical
+        XA_osv_a = XA_osv_a->get_block({zero, XA_osv_a->rowspi()}, {zero, dim_final});
+        osv_occ = osv_occ->get_block({zero, dim_final});
+
+        //outfile->Printf("  Checkpoint :\n");
+        //XA_osv_a->print_out();
+        //FA_osv_a->print_out();
+        auto FA_pao_a = linalg::triplet(XA_pao[a], FA_pao, XA_pao[a], true, false, false);
+        auto SA_pao_a = linalg::triplet(XA_pao[a], SA_pao, XA_pao[a], true, false, false);
+
+        auto temp1 = linalg::triplet(XA_osv_a, FA_pao_a, XA_osv_a, true, false, false);
+        auto temp2 = linalg::triplet(XA_osv_a, SA_pao_a, XA_osv_a, true, false, false);
+        outfile->Printf("  FA before:\n");
+        temp1->print_out();
+        outfile->Printf("  SA before:\n");
+        temp2->print_out();
+
+        SharedMatrix osv_canon;
+        SharedVector e_osv_a;
+        std::tie(osv_canon, e_osv_a) = canonicalizer(XA_osv_a, FA_pao_a);
+
+        // Now the transformation gives orbitals that are orthonormal and canonical
+        XA_osv_a = linalg::doublet(XA_osv_a, osv_canon, false, false);
+
+        temp1 = linalg::triplet(XA_osv_a, FA_pao_a, XA_osv_a, true, false, false);
+        temp2 = linalg::triplet(XA_osv_a, SA_pao_a, XA_osv_a, true, false, false);
+        outfile->Printf("  FA after:\n");
+        temp1->print_out();
+        outfile->Printf("  SA after:\n");
+        temp2->print_out();
+
+
     }
+
+    outfile->Printf("  !! Forming OSVs B... \n");
 
     for(size_t b = 0; b < nb; b++) {
         //SharedMatrix XA_pao[a]; // canonical transform for the PAOs of atom a
@@ -3654,8 +3776,6 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         }
 
     }
-    FA_lmo->print_out();
-    FB_lmo->print_out();
 
     for(int ab = 0; ab < npair; ab++) {
         int a, b;
