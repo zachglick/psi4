@@ -1097,6 +1097,11 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
         /*- Filepath to drop sSAPT0 exchange-scaling F-SAPT data within input file directory -*/
         options.add_str_i("FISAPT_FSSAPT_FILEPATH", "s-fsapt/");
 
+        // => Local Dispersion Options <= //
+
+        /*- OSV occupation number cutoff -*/
+        options.add_double("T_CUT_OSV", 1e-8);
+
         // => CubicScalarGrid options <= //
 
         /*- CubicScalarGrid spatial extent in bohr [O_X, O_Y, O_Z]. Defaults to 4.0 bohr each. -*/
