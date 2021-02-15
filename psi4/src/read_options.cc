@@ -1101,6 +1101,8 @@ int read_options(const std::string &name, Options &options, bool suppress_printi
 
         /*- OSV occupation number cutoff -*/
         options.add_double("T_CUT_OSV", 1e-8);
+        /*- PAO domain cutoff -*/
+        options.add_double("T_CUT_DO", 1e-2);
 
         // => CubicScalarGrid options <= //
 
