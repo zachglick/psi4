@@ -3069,6 +3069,82 @@ std::vector<int> merge_lists(const std::vector<int> &l1, const std::vector<int> 
 
 
 
+/* Args: SparseMap from x to y, SparseMap from y to z
+ * Returns: SparseMap from x to z
+ */
+std::vector<std::vector<int>> chain_maps(const std::vector<std::vector<int>> &x_to_y, const std::vector<std::vector<int>> &y_to_z) {
+
+    int nx = x_to_y.size();
+    std::vector<std::vector<int>> x_to_z(nx);
+
+    for(int x = 0; x < nx; x++) {
+        for(auto y : x_to_y[x]) {
+            for(auto z : y_to_z[y]) {
+                x_to_z[x].push_back(z);
+            }
+        }
+        std::sort(x_to_z[x].begin(), x_to_z[x].end());
+        x_to_z[x].erase(std::unique(x_to_z[x].begin(), x_to_z[x].end()), x_to_z[x].end());
+    }
+
+    return x_to_z;
+
+}
+
+/* Args: SparseMap from x to y, list of pairs of type x
+ * Returns: extended SparseMap from x to y
+ */
+std::vector<std::vector<int>> extend_maps(const std::vector<std::vector<int>> &x_to_y, const std::vector<std::pair<int,int>> &xpairs) {
+
+    int nx = x_to_y.size();
+    std::vector<std::vector<int>> xext_to_y(nx);
+
+    for(auto xpair : xpairs) {
+        size_t x1, x2;
+        std::tie(x1,x2) = xpair;
+        xext_to_y[x1] = merge_lists(xext_to_y[x1], x_to_y[x2]);
+    }
+
+    return xext_to_y;
+
+}
+
+/* Args: SparseMap from x to y1, sparse map from x to y2
+ * Returns: SparseMap from x to the union of y1 and y2
+ */
+std::vector<std::vector<int>> merge_maps(const std::vector<std::vector<int>> &x_to_y1, const std::vector<std::vector<int>> &x_to_y2) {
+
+    int nx = x_to_y1.size();
+    if(x_to_y2.size() != nx) throw PSIEXCEPTION("Error: maps must have the same domain.");
+
+    std::vector<std::vector<int>> x_to_y12(nx);
+
+    for(int x = 0; x < nx; x++) {
+        x_to_y12[x] = merge_lists(x_to_y1[x], x_to_y2[x]);
+    }
+
+    return x_to_y12;
+
+}
+
+
+/* Args: SparseMap from x to y, maximum possible y value
+ * Returns: SparseMap from y to x
+ */
+std::vector<std::vector<int>> invert_map(const std::vector<std::vector<int>> &x_to_y, int ny) {
+
+    int nx = x_to_y.size();
+    std::vector<std::vector<int>> y_to_x(ny);
+
+    for(int x = 0; x < nx; x++) {
+        for(auto y : x_to_y[x]) {
+            y_to_x[y].push_back(x);
+        }
+    }
+
+    return y_to_x;
+
+}
 
 
 // Compute total dispersion contribution
@@ -3523,6 +3599,17 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
     outfile->Printf("  !!   Energy  Criteria: %zu / %zu pairs \n", energy_count, naa * nab);
     outfile->Printf("  !!   Combined:         %zu / %zu pairs \n", both_count, naa * nab);
 
+    // does this LMO interact with at least one LMO on the other monomer?
+    std::vector<bool> does_interactA(na, false);
+    std::vector<bool> does_interactB(nb, false);
+    for(int ab = 0; ab < npair; ab++) {
+        int a, b;
+        std::tie(a, b) = ab_to_a_b[ab];
+        does_interactA[a] = true;
+        does_interactB[b] = true;
+    }
+
+
     timer_on("mulliken");
 
     std::vector<std::vector<int>> atom_to_ribf_(natom);
@@ -3621,6 +3708,222 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 
     timer_off("mulliken");
 
+    timer_on("PAO Sparsity");
+
+    std::vector<int> bf_to_atom_(nbf);
+    std::vector<int> ribf_to_atom_(naux);
+
+    for (size_t u = 0; u < nbf; ++u) {
+        bf_to_atom_[u] = primary_->function_to_center(u);
+    }
+    for (size_t q = 0; q < naux; ++q) {
+        ribf_to_atom_[q] = auxiliary->function_to_center(q);
+    }
+
+    std::vector<std::vector<int>> lmoA_to_paosA_(na);
+    std::vector<std::vector<int>> lmoB_to_paosB_(nb);
+
+    std::vector<std::vector<int>> lmoA_to_paoatomsA_(na);
+    std::vector<std::vector<int>> lmoB_to_paoatomsB_(nb);
+
+    for (size_t a = 0; a < na; ++a) {
+        // PAO domains determined by differential overlap integral
+        std::vector<int> lmo_to_paos_temp;
+        for (size_t r = 0; r < nbf; ++r) {
+            if (fabs(DOI_ar->get(a, r)) > T_CUT_DO) {
+                lmo_to_paos_temp.push_back(r);
+            }
+        }
+
+        // if any PAO on an atom is in the list, we take all of the PAOs on that atom
+        lmoA_to_paosA_[a] = contract_lists(lmo_to_paos_temp, atom_to_bf_);
+
+        // equivalent to previous map
+        lmoA_to_paoatomsA_[a] = block_list(lmoA_to_paosA_[a], bf_to_atom_);
+
+        //outfile->Printf("  !! LMO %d has %d / %d PAO ATOMS or %d / %d PAOs\n", a, lmoA_to_paoatomsA_[a].size(), natom, lmoA_to_paosA_[a].size(), nbf);
+    }
+
+    for (size_t b = 0; b < nb; ++b) {
+        // PAO domains determined by differential overlap integral
+        std::vector<int> lmo_to_paos_temp;
+        for (size_t s = 0; s < nbf; ++s) {
+            if (fabs(DOI_bs->get(b, s)) > T_CUT_DO) {
+                lmo_to_paos_temp.push_back(s);
+            }
+        }
+
+        // if any PAO on an atom is in the list, we take all of the PAOs on that atom
+        lmoB_to_paosB_[b] = contract_lists(lmo_to_paos_temp, atom_to_bf_);
+
+        // equivalent to previous map
+        lmoB_to_paoatomsB_[b] = block_list(lmoB_to_paosB_[b], bf_to_atom_);
+
+        //outfile->Printf("  !! LMO %d has %d / %d PAO ATOMS or %d / %d PAOs\n", b, lmoB_to_paoatomsB_[b].size(), natom, lmoB_to_paosB_[b].size(), nbf);
+    }
+
+    timer_off("PAO Sparsity");
+
+    timer_on("LMO Sparsity");
+
+    // maps of INTERACTING lmos in opposite monomers
+    std::vector<std::vector<int>> intlmoA_to_intlmosB_(na);
+    for(int ab = 0; ab < npair; ab++) {
+        int a, b;
+        std::tie(a, b) = ab_to_a_b[ab];
+        intlmoA_to_intlmosB_[a].push_back(b);
+    }
+    std::vector<std::vector<int>> intlmoB_to_intlmosA_ = invert_map(intlmoA_to_intlmosB_, nb);
+
+    std::vector<std::vector<int>> intlmoA_to_riatoms_(na);
+    std::vector<std::vector<int>> intlmoB_to_riatoms_(nb);
+    for(int a = 0; a < na; a++) {
+        if(does_interactA[a]) intlmoA_to_riatoms_[a] = lmoA_to_riatoms_[a];
+    }
+    for(int b = 0; b < nb; b++) {
+        if(does_interactB[b]) intlmoB_to_riatoms_[b] = lmoB_to_riatoms_[b];
+    }
+
+    std::vector<std::vector<int>> lmoA_to_lmosA_(na);
+    std::vector<std::vector<int>> lmoA_to_lmosB_(na);
+    std::vector<std::vector<int>> lmoB_to_lmosA_(nb);
+    std::vector<std::vector<int>> lmoB_to_lmosB_(nb);
+
+    for(int a = 0; a < na; a++) {
+
+        // TODO: remove pushback if all neighbors are non-interacting
+        if(!does_interactA[a]) {
+            outfile->Printf("LMOA %d is non-interacting \n", a);
+            lmoA_to_lmosA_[a].push_back(a);
+            continue;
+        }
+
+        for(int x = 0; x < na; x++) {
+            if(DOI_aa->get(a, x) > T_CUT_DO_ij) {
+                lmoA_to_lmosA_[a].push_back(x);
+            }
+        }
+        for(int y = 0; y < nb; y++) {
+            if(DOI_ab->get(a, y) > T_CUT_DO_ij) {
+                lmoA_to_lmosB_[a].push_back(y);
+            } else if (a >= nfa && y >= nfb && fabs(e_linear->get(a - nfa, y - nfb)) > T_CUT_PRE) {
+                lmoA_to_lmosB_[a].push_back(y);
+            }
+        }
+
+        outfile->Printf("LMOA %d has %d / %d intra and %d / %d inter neighbors\n", a, lmoA_to_lmosA_[a].size(), na, lmoA_to_lmosB_[a].size(), nb);
+
+    }
+
+    for(int b = 0; b < nb; b++) {
+
+        // TODO: remove pushback if all neighbors are non-interacting
+        if(!does_interactB[b]) {
+            outfile->Printf("LMOB %d is non-interacting \n", b);
+            lmoB_to_lmosB_[b].push_back(b);
+            continue;
+        }
+
+        for(int x = 0; x < na; x++) {
+            if(DOI_ab->get(x, b) > T_CUT_DO_ij) {
+                lmoB_to_lmosA_[b].push_back(x);
+            } else if (x >= nfa && b >= nfb && fabs(e_linear->get(x - nfa, b - nfb)) > T_CUT_PRE) {
+                lmoB_to_lmosA_[b].push_back(x);
+            }
+        }
+        for(int y = 0; y < nb; y++) {
+            if(DOI_bb->get(b, y) > T_CUT_DO_ij) {
+                lmoB_to_lmosB_[b].push_back(y);
+            }
+        }
+
+        outfile->Printf("LMOB %d has %d / %d intra and %d / %d inter neighbors\n", b, lmoB_to_lmosB_[b].size(), nb, lmoB_to_lmosA_[b].size(), na);
+
+    }
+
+    // quick sanity check
+    for(size_t a = 0; a < na; a++) {
+        //if(!does_interactA[a]) continue;
+        bool okay = false;
+        for(size_t x : lmoA_to_lmosA_[a]) {
+            if( x == a ) {
+                okay = true;
+            }
+        }
+        if(!okay) {
+            throw PSIEXCEPTION("Extended List Issue");
+        }
+    }
+
+    for(size_t b = 0; b < nb; b++) {
+        //if(!does_interactB[b]) continue;
+        bool okay = false;
+        for(size_t y : lmoB_to_lmosB_[b]) {
+            if( y == b ) {
+                okay = true;
+            }
+        }
+        if(!okay) {
+            throw PSIEXCEPTION("Extended List Issue");
+        }
+    }
+
+    std::vector<std::vector<int>> lmoA_to_lmosB_inv_ = invert_map(lmoB_to_lmosA_, na);
+    std::vector<std::vector<int>> lmoB_to_lmosA_inv_ = invert_map(lmoA_to_lmosB_, nb);
+    std::vector<std::vector<int>> lmoA_to_lmosA_inv_ = invert_map(lmoA_to_lmosA_, na);
+    std::vector<std::vector<int>> lmoB_to_lmosB_inv_ = invert_map(lmoB_to_lmosB_, nb);
+
+    // TODO: chain maps should be restricted to only AB pairs, not A-> (FC)B or B->(FC)A (I think this is done)
+    // TODO: lmoA_to_riatoms should be null if a is non-interacting (I think this is also done)
+    //std::vector<std::vector<int>> lmoA_to_riatoms_ext1 = merge_maps(lmoA_to_riatoms_, chain_maps(intlmoA_to_intlmosB_, lmoB_to_riatoms_));
+    //std::vector<std::vector<int>> lmoB_to_riatoms_ext1 = merge_maps(lmoB_to_riatoms_, chain_maps(intlmoB_to_intlmosA_, lmoA_to_riatoms_));
+    std::vector<std::vector<int>> lmoA_to_riatoms_ext1 = merge_maps(intlmoA_to_riatoms_, chain_maps(intlmoA_to_intlmosB_, lmoB_to_riatoms_));
+    std::vector<std::vector<int>> lmoB_to_riatoms_ext1 = merge_maps(intlmoB_to_riatoms_, chain_maps(intlmoB_to_intlmosA_, lmoA_to_riatoms_));
+
+    std::vector<std::vector<int>> lmoA_to_riatoms_ext = merge_maps(chain_maps(lmoA_to_lmosB_inv_, lmoB_to_riatoms_ext1),
+                                                                   chain_maps(lmoA_to_lmosA_inv_, lmoA_to_riatoms_ext1));
+    std::vector<std::vector<int>> lmoB_to_riatoms_ext = merge_maps(chain_maps(lmoB_to_lmosA_inv_, lmoA_to_riatoms_ext1),
+                                                                   chain_maps(lmoB_to_lmosB_inv_, lmoB_to_riatoms_ext1));
+
+    for(size_t a = 0; a < na; a++) {
+        outfile->Printf("  !! LMOa %d has extended domain of %d / %d RIATOMS\n", a, lmoA_to_riatoms_ext[a].size(), natom);
+    }
+    for(size_t b = 0; b < nb; b++) {
+        outfile->Printf("  !! LMOb %d has extended domain of %d / %d RIATOMS\n", b, lmoB_to_riatoms_ext[b].size(), natom);
+    }
+
+    std::vector<std::vector<int>> riatom_to_lmosA_ext = invert_map(lmoA_to_riatoms_ext, natom);
+    std::vector<std::vector<int>> riatom_to_lmosB_ext = invert_map(lmoB_to_riatoms_ext, natom);
+
+    std::vector<std::vector<int>> riatom_to_lmosA_ext_dense(natom, std::vector<int>(na, -1));
+    std::vector<std::vector<int>> riatom_to_lmosB_ext_dense(natom, std::vector<int>(nb, -1));
+
+    for(int atom = 0; atom < natom; atom++) {
+
+        for(int aind = 0; aind < riatom_to_lmosA_ext[atom].size(); aind++) {
+            int a = riatom_to_lmosA_ext[atom][aind];
+            riatom_to_lmosA_ext_dense[atom][a] = aind;
+        }
+
+        for(int bind = 0; bind < riatom_to_lmosB_ext[atom].size(); bind++) {
+            int b = riatom_to_lmosB_ext[atom][bind];
+            riatom_to_lmosB_ext_dense[atom][b] = bind;
+        }
+
+    }
+
+    for(size_t atom = 0; atom < natom; atom++) {
+        outfile->Printf("  !! RIATOM %d has %d / %d LMOSA and %d / %d LMOSB \n", atom, riatom_to_lmosA_ext[atom].size(), na, riatom_to_lmosB_ext[atom].size(), nb);
+    } 
+
+
+
+    timer_off("LMO Sparsity");
+
+
+
+
+    //std::vector<std::vector<int>> lmoA_to_riatoms_ext = extend_maps_ab(lmoA_to_riatoms_, lmoB_to_riatoms, ab_to_a_b);
 
     timer_on("Integrals");
 
@@ -3764,107 +4067,6 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 
     timer_off("Integrals");
 
-    timer_on("PAO Sparsity");
-
-    std::vector<int> bf_to_atom_(nbf);
-
-    for (size_t u = 0; u < nbf; ++u) {
-        bf_to_atom_[u] = primary_->function_to_center(u);
-    }
-
-
-    std::vector<std::vector<int>> lmoA_to_paosA_(na);
-    std::vector<std::vector<int>> lmoB_to_paosB_(nb);
-
-    std::vector<std::vector<int>> lmoA_to_paoatomsA_(na);
-    std::vector<std::vector<int>> lmoB_to_paoatomsB_(nb);
-
-    for (size_t a = 0; a < na; ++a) {
-        // PAO domains determined by differential overlap integral
-        std::vector<int> lmo_to_paos_temp;
-        for (size_t r = 0; r < nbf; ++r) {
-            if (fabs(DOI_ar->get(a, r)) > T_CUT_DO) {
-                lmo_to_paos_temp.push_back(r);
-            }
-        }
-
-        // if any PAO on an atom is in the list, we take all of the PAOs on that atom
-        lmoA_to_paosA_[a] = contract_lists(lmo_to_paos_temp, atom_to_bf_);
-
-        // equivalent to previous map
-        lmoA_to_paoatomsA_[a] = block_list(lmoA_to_paosA_[a], bf_to_atom_);
-
-        //outfile->Printf("  !! LMO %d has %d / %d PAO ATOMS or %d / %d PAOs\n", a, lmoA_to_paoatomsA_[a].size(), natom, lmoA_to_paosA_[a].size(), nbf);
-    }
-
-    for (size_t b = 0; b < nb; ++b) {
-        // PAO domains determined by differential overlap integral
-        std::vector<int> lmo_to_paos_temp;
-        for (size_t s = 0; s < nbf; ++s) {
-            if (fabs(DOI_bs->get(b, s)) > T_CUT_DO) {
-                lmo_to_paos_temp.push_back(s);
-            }
-        }
-
-        // if any PAO on an atom is in the list, we take all of the PAOs on that atom
-        lmoB_to_paosB_[b] = contract_lists(lmo_to_paos_temp, atom_to_bf_);
-
-        // equivalent to previous map
-        lmoB_to_paoatomsB_[b] = block_list(lmoB_to_paosB_[b], bf_to_atom_);
-
-        //outfile->Printf("  !! LMO %d has %d / %d PAO ATOMS or %d / %d PAOs\n", b, lmoB_to_paoatomsB_[b].size(), natom, lmoB_to_paosB_[b].size(), nbf);
-    }
-
-    timer_off("PAO Sparsity");
-
-    std::vector<std::vector<int>> lmoA_to_lmosA_(na);
-    std::vector<std::vector<int>> lmoA_to_lmosB_(na);
-    std::vector<std::vector<int>> lmoB_to_lmosA_(nb);
-    std::vector<std::vector<int>> lmoB_to_lmosB_(nb);
-
-    timer_on("LMO Sparsity");
-
-    for(int a = 0; a < na; a++) {
-
-        for(int x = 0; x < na; x++) {
-            if(DOI_aa->get(a, x) > T_CUT_DO_ij) {
-                lmoA_to_lmosA_[a].push_back(x);
-            }
-        }
-        for(int y = 0; y < nb; y++) {
-            if(DOI_ab->get(a, y) > T_CUT_DO_ij) {
-                lmoA_to_lmosB_[a].push_back(y);
-            } else if (a >= nfa && y >= nfb && fabs(e_linear->get(a - nfa, y - nfb)) > T_CUT_PRE) {
-                lmoA_to_lmosB_[a].push_back(y);
-            }
-        }
-
-        outfile->Printf("LMOA %d has %d / %d and %d / %d neighbors\n", a, lmoA_to_lmosA_[a].size(), na, lmoA_to_lmosB_[a].size(), nb);
-
-    }
-
-    for(int b = 0; b < nb; b++) {
-
-        for(int x = 0; x < na; x++) {
-            if(DOI_ab->get(x, b) > T_CUT_DO_ij) {
-                lmoB_to_lmosA_[b].push_back(x);
-            } else if (x >= nfa && b >= nfb && fabs(e_linear->get(x - nfa, b - nfb)) > T_CUT_PRE) {
-                lmoB_to_lmosA_[b].push_back(x);
-            }
-        }
-        for(int y = 0; y < nb; y++) {
-            if(DOI_bb->get(b, y) > T_CUT_DO_ij) {
-                lmoB_to_lmosB_[b].push_back(y);
-            }
-        }
-
-        outfile->Printf("LMOB %d has %d / %d and %d / %d neighbors\n", b, lmoB_to_lmosB_[b].size(), nb, lmoB_to_lmosA_[b].size(), na);
-
-    }
-
-
-
-    timer_off("LMO Sparsity");
 
     // canonical transformation from PAOs -> virtuals
     std::vector<SharedMatrix> XA_can(na), XB_can(nb); 
@@ -3880,28 +4082,37 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 #pragma omp parallel for schedule(static, 1)
     for(size_t a = 0; a < na; a++) {
 
-        SharedMatrix SA_pao_a = submatrix_rows_and_cols(SA_pao, lmoA_to_paosA_[a], lmoA_to_paosA_[a]);
-        SharedMatrix FA_pao_a = submatrix_rows_and_cols(FA_pao, lmoA_to_paosA_[a], lmoA_to_paosA_[a]);
+        // we don't need OSVs if a isn't at the contact site
+        if(!does_interactA[a]) continue;
 
-        //std::tie(XA_can[a], eA_can[a]) = orthocanonicalizer(SA_pao, FA_pao); // TODO: use subset of SA_pao, FA_pao
+        auto ribfs_a = lmoA_to_ribfs_[a];
+        auto paos_a = lmoA_to_paosA_[a];
+
+        SharedMatrix SA_pao_a = submatrix_rows_and_cols(SA_pao, paos_a, paos_a);
+        SharedMatrix FA_pao_a = submatrix_rows_and_cols(FA_pao, paos_a, paos_a);
+        SharedMatrix met_a = submatrix_rows_and_cols(met, ribfs_a, ribfs_a);
+
         std::tie(XA_can[a], eA_can[a]) = orthocanonicalizer(SA_pao_a, FA_pao_a); // TODO: use subset of SA_pao, FA_pao
-        auto npao_dep_a = XA_can[a]->rowspi()[0]; // possibly linear dependent PAOs
-        auto npao_a = XA_can[a]->colspi()[0]; // orthocanonicalized PAOs
+
+        int npao_dep_a = XA_can[a]->rowspi()[0]; // possibly linear dependent PAOs
+        int npao_a = XA_can[a]->colspi()[0]; // orthocanonicalized PAOs
+        int naux_a = ribfs_a.size();
 
         // get (ar|Q) integrals for fixed a
-        auto Qar_a = std::make_shared<Matrix>("(ar|Q)_a", naux, npao_dep_a);
-        for(size_t q = 0; q < naux; q++) {
+        auto Qar_a = std::make_shared<Matrix>("(ar|Q)_a", naux_a, npao_dep_a);
+        for(size_t qind = 0; qind < naux_a; qind++) {
+            size_t q = ribfs_a[qind];
+            if(riatom_to_lmosA_ext_dense[ribf_to_atom_[q]][a] == -1) throw PSIEXCEPTION("INDEX ERROR: OSVs A");
             for(size_t rind = 0; rind < npao_dep_a; rind++) {
                 size_t r = lmoA_to_paosA_[a][rind];
-                Qar_a->set(q, rind, Qar[q]->get(a, r));
+                Qar_a->set(qind, rind, Qar[q]->get(a, r));
             }
         }
         Qar_a = linalg::doublet(Qar_a, XA_can[a]); // (naux x npao_pre_a) (npao_pre_a x npao_a)
 
         // contract Qar_a with inverse metric
         auto Jar_a = Qar_a->clone();
-        auto local_met = met->clone();
-        C_DGESV_wrapper(local_met, Jar_a);
+        C_DGESV_wrapper(met_a, Jar_a);
 
         // (ar|ar')_a
         auto v_aa = linalg::doublet(Jar_a, Qar_a, true, false);
@@ -3955,28 +4166,38 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 #pragma omp parallel for schedule(static, 1)
     for(size_t b = 0; b < nb; b++) {
 
-        SharedMatrix SB_pao_b = submatrix_rows_and_cols(SB_pao, lmoB_to_paosB_[b], lmoB_to_paosB_[b]);
-        SharedMatrix FB_pao_b = submatrix_rows_and_cols(FB_pao, lmoB_to_paosB_[b], lmoB_to_paosB_[b]);
+        // we don't need OSVs if a isn't at the contact site
+        if(!does_interactB[b]) continue;
+
+        auto ribfs_b = lmoB_to_ribfs_[b];
+        auto paos_b = lmoB_to_paosB_[b];
+
+        SharedMatrix SB_pao_b = submatrix_rows_and_cols(SB_pao, paos_b, paos_b);
+        SharedMatrix FB_pao_b = submatrix_rows_and_cols(FB_pao, paos_b, paos_b);
+        SharedMatrix met_b = submatrix_rows_and_cols(met, ribfs_b, ribfs_b);
 
 
         std::tie(XB_can[b], eB_can[b]) = orthocanonicalizer(SB_pao_b, FB_pao_b); // TODO: use subset of SB_pao, FB_pao
-        auto npao_dep_b = XB_can[b]->rowspi()[0]; // possibly linear dependent PAOs
-        auto npao_b = XB_can[b]->colspi()[0]; // orthocanonicalized PAOs
+
+        int npao_dep_b = XB_can[b]->rowspi()[0]; // possibly linear dependent PAOs
+        int npao_b = XB_can[b]->colspi()[0]; // orthocanonicalized PAOs
+        int naux_b = ribfs_b.size();
 
         // get (bs|Q) integrals for fixed b
-        auto Qbs_b = std::make_shared<Matrix>("(bs|Q)_b", naux, npao_dep_b);
-        for(size_t q = 0; q < naux; q++) {
+        auto Qbs_b = std::make_shared<Matrix>("(bs|Q)_b", naux_b, npao_dep_b);
+        for(size_t qind = 0; qind < naux_b; qind++) {
+            size_t q = ribfs_b[qind];
+            if(riatom_to_lmosB_ext_dense[ribf_to_atom_[q]][b] == -1) throw PSIEXCEPTION("INDEX ERROR: OSVs B");
             for(size_t sind = 0; sind < npao_dep_b; sind++) {
                 size_t s = lmoB_to_paosB_[b][sind];
-                Qbs_b->set(q, sind, Qbs[q]->get(b, s));
+                Qbs_b->set(qind, sind, Qbs[q]->get(b, s));
             }
         }
         Qbs_b = linalg::doublet(Qbs_b, XB_can[b]); // (naux x npao_pre_a) (npao_pre_a x npao_b)
 
         // contract Qar_a with inverse metric
         auto Jbs_b = Qbs_b->clone();
-        auto local_met = met->clone();
-        C_DGESV_wrapper(local_met, Jbs_b);
+        C_DGESV_wrapper(met_b, Jbs_b);
 
         // (bs|bs')_b
         auto v_bb = linalg::doublet(Jbs_b, Qbs_b, true, false);
@@ -4033,14 +4254,18 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 
     timer_on("OSV Overlaps");
     for(size_t a = 0; a < na; a++) {
+        if(!does_interactA[a]) continue;
         for(size_t c = 0; c < na; c++) {
+            if(!does_interactA[c]) continue;
             auto SA_pao_ac = submatrix_rows_and_cols(SA_pao, lmoA_to_paosA_[a], lmoA_to_paosA_[c]);
             osv_overlaps_aa[a][c] = linalg::triplet(XA_osv[a], SA_pao_ac, XA_osv[c], true, false, false);
         }
     }
 
     for(size_t b = 0; b < nb; b++) {
+        if(!does_interactB[b]) continue;
         for(size_t d = 0; d < nb; d++) {
+            if(!does_interactB[d]) continue;
             auto SB_pao_bd = submatrix_rows_and_cols(SB_pao, lmoB_to_paosB_[b], lmoB_to_paosB_[d]);
             osv_overlaps_bb[b][d] = linalg::triplet(XB_osv[b], SB_pao_bd, XB_osv[d], true, false, false);
         }
@@ -4055,6 +4280,8 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 
     outfile->Printf("  !! Iterating over (%d / %d) ab pairs \n", npair, naa * nab);
 
+    std::vector<double> de_osv_ab(npair, 0.0);
+
     timer_on("Disp Pre-Iterations");
 #pragma omp parallel for schedule(static, 1)
     for(int ab = 0; ab < npair; ab++) {
@@ -4068,6 +4295,9 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         int npao_a = XA_osv[a]->rowspi()[0]; // number of PAOs
         int npao_b = XB_osv[b]->rowspi()[0]; // number of PAOs
 
+        int ncan_a = XA_can[a]->colspi()[0]; // number of canonical virtuals
+        int ncan_b = XB_can[b]->colspi()[0]; // number of canonical virtuals
+
         int nosv_a = XA_osv[a]->colspi()[0]; // number of OSVs
         int nosv_b = XB_osv[b]->colspi()[0]; // number of OSVs
 
@@ -4076,29 +4306,46 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         auto Qar_a = std::make_shared<Matrix>("(ar|Q)_a", naux_ab, npao_a);
         for(size_t qind = 0; qind < naux_ab; qind++) {
             size_t q = ribfs_ab[qind];
+            if(riatom_to_lmosA_ext_dense[ribf_to_atom_[q]][a] == -1) throw PSIEXCEPTION("INDEX ERROR: Pre-Iterations A");
             for(size_t rind = 0; rind < npao_a; rind++) {
                 size_t r = lmoA_to_paosA_[a][rind];
                 Qar_a->set(qind, rind, Qar[q]->get(a,r));
             }
         }
+        auto Qar_a_full = linalg::doublet(Qar_a, XA_can[a], false, false);
         Qar_a = linalg::doublet(Qar_a, XA_osv[a], false, false);
 
         auto Qbs_b = std::make_shared<Matrix>("(bs|Q)_b", naux_ab, npao_b);
         for(size_t qind = 0; qind < naux_ab; qind++) {
             size_t q = ribfs_ab[qind];
+            if(riatom_to_lmosB_ext_dense[ribf_to_atom_[q]][b] == -1) throw PSIEXCEPTION("INDEX ERROR: Pre-Iterations B");
             for(size_t sind = 0; sind < npao_b; sind++) {
                 size_t s = lmoB_to_paosB_[b][sind];
                 Qbs_b->set(qind, sind, Qbs[q]->get(b,s));
             }
         }
+        auto Qbs_b_full = linalg::doublet(Qbs_b, XB_can[b], false, false);
         Qbs_b = linalg::doublet(Qbs_b, XB_osv[b], false, false);
 
         auto local_met = submatrix_rows_and_cols(met, ribfs_ab, ribfs_ab);
+        C_DGESV_wrapper(local_met->clone(), Qar_a_full);
         C_DGESV_wrapper(local_met, Qar_a);
+
+        auto v_full = linalg::doublet(Qar_a_full, Qbs_b_full, true, false);
         v_abrs[ab] = linalg::doublet(Qar_a, Qbs_b, true, false);
 
+        // full canonical amplitudes
+        auto t_full = std::make_shared<Matrix>("Full Dispersion Amplitudes", ncan_a, ncan_b);
+        for(size_t r = 0; r < ncan_a; r++) {
+            for(size_t s = 0; s < ncan_b; s++) {
+                double denom = (eA_can[a]->get(r) + eB_can[b]->get(s)) - (FA_lmo->get(a,a) + FB_lmo->get(b,b));
+                t_full->set(r, s, -1.0 * v_full->get(r,s) / denom);
+            }
+        }
+
+        // OSV amplitudes
         e_abrs[ab] = std::make_shared<Matrix>("Energy Denominator", nosv_a, nosv_b);
-        t_abrs[ab] = std::make_shared<Matrix>("Dispersion Amplitudes", nosv_a, nosv_b);
+        t_abrs[ab] = std::make_shared<Matrix>("OSV Dispersion Amplitudes", nosv_a, nosv_b);
         for(size_t r = 0; r < nosv_a; r++) {
             for(size_t s = 0; s < nosv_b; s++) {
                 double denom = (eA_osv[a]->get(r) + eB_osv[b]->get(s)) - (FA_lmo->get(a,a) + FB_lmo->get(b,b));
@@ -4107,31 +4354,43 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
             }
         }
 
+        double e_pair_full = 4.0 * t_full->vector_dot(v_full);
+        double e_pair = 4.0 * t_abrs[ab]->vector_dot(v_abrs[ab]);
+        de_osv_ab[ab] = e_pair_full - e_pair;
+
     }
     timer_off("Disp Pre-Iterations");
 
-    double disp_tot, disp_plain;
+    double de_osv_ = 0.0;
+    for(int ab = 0; ab < npair; ab++) {
+        de_osv_ += de_osv_ab[ab];
+    }
+
+    double disp20_iter_;
 
     timer_on("Disp Iterations");
     for(int iteration=0; iteration < 15; iteration++) {
 
         r_abrs = calc_residual(t_abrs, e_abrs, v_abrs, ab_to_a_b, a_b_to_ab, osv_overlaps_aa, osv_overlaps_bb, FA_lmo, FB_lmo);
-        disp_tot = 0.0;
-        disp_plain = 0.0;
+        disp20_iter_ = 0.0;
 
         for(int ab = 0; ab < npair; ab++) {
-            disp_tot += 4.0 * (t_abrs[ab]->vector_dot(v_abrs[ab]) + t_abrs[ab]->vector_dot(r_abrs[ab]));
-            disp_plain += 4.0 * (t_abrs[ab]->vector_dot(v_abrs[ab]));
+            disp20_iter_ += 4.0 * (t_abrs[ab]->vector_dot(v_abrs[ab]) + t_abrs[ab]->vector_dot(r_abrs[ab]));
         }
 
         t_abrs = update_amps(t_abrs, e_abrs, r_abrs);
 
-        outfile->Printf("  !!   @IterDisp: %.8f %.8f\n", disp_tot * pc_hartree2kcalmol, disp_plain * pc_hartree2kcalmol);
+        outfile->Printf("  !!   @IterDisp: %.8f\n", disp20_iter_ * pc_hartree2kcalmol);
 
     }
     timer_off("Disp Iterations");
 
-    outfile->Printf("  !! Disp20: %.8f %.8f\n", (disp_tot + de_dipole_) * pc_hartree2kcalmol, (disp_plain + de_dipole_) * pc_hartree2kcalmol);
+    double disp20_tot = disp20_iter_ + de_dipole_ + de_osv_;
+
+    outfile->Printf("  !! Disp20:              %14.8f\n", disp20_tot * pc_hartree2kcalmol);
+    outfile->Printf("  !!   iter. dispersion:  %14.8f\n", disp20_iter_ * pc_hartree2kcalmol);
+    outfile->Printf("  !!   dipole correction: %14.8f\n", de_dipole_ * pc_hartree2kcalmol);
+    outfile->Printf("  !!   osv correction:    %14.8f\n", de_osv_* pc_hartree2kcalmol);
 
     timer_on("ExchDisp");
 
@@ -4144,7 +4403,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
     auto VB_ar_all = linalg::triplet(CA_lmo, V_B, CA_pao, true, false, false);
 
     std::vector<double> exchdisp_ab(npair, 0.0);
-    std::vector<std::vector<double>> exchdisp_ab_comps(8, std::vector<double>(npair, 0.0));
+    std::vector<std::vector<double>> exchdisp_ab_comps(16, std::vector<double>(npair, 0.0));
 
     //for(int ab = 0; ab < npair; ab++) {
     //    int a, b;
@@ -4164,8 +4423,12 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         // local stuff
         auto riatoms_ab = merge_lists(lmoA_to_riatoms_[a], lmoB_to_riatoms_[b]);
         auto ribfs_ab = merge_lists(lmoA_to_ribfs_[a], lmoB_to_ribfs_[b]);
-        auto lmos_a = lmoB_to_lmosA_[b];
-        auto lmos_b = lmoA_to_lmosB_[a];
+        //auto lmos_a = lmoB_to_lmosA_[b]; //merge_lists(lmoA_to_lmosA_[a], lmoB_to_lmosA_[b]);
+        //auto lmos_b = lmoA_to_lmosB_[a]; //merge_lists(lmoB_to_lmosB_[b], lmoA_to_lmosB_[a]);
+        auto lmos_a = merge_lists(lmoA_to_lmosA_[a], lmoB_to_lmosA_[b]);
+        auto lmos_b = merge_lists(lmoB_to_lmosB_[b], lmoA_to_lmosB_[a]);
+        //auto lmos_a = lmoB_to_lmosA_[b];
+        //auto lmos_b = lmoA_to_lmosB_[a];
         int naux_ab = ribfs_ab.size();
         int naloc = lmos_a.size();
         int nbloc = lmos_b.size();
@@ -4189,7 +4452,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         int nosv_b = XB_osv[b]->colspi()[0];
 
 
-        // (ar|Q) and (bs|Q) integrals eith different slow indices
+        // (ar|Q) and (bs|Q) integrals with different slow indices
         std::vector<SharedMatrix> rQa(nosv_a), sQb(nosv_b);
         std::vector<SharedMatrix> aQr(naloc), bQs(nbloc);
 
@@ -4198,14 +4461,16 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 
         //timer_on("Copy Qar");
         auto Qar_rect = std::make_shared<Matrix>("", naux_ab * naloc, npao_a);
+        double** Qar_rectp = Qar_rect->pointer();
         for(size_t qind=0; qind < naux_ab; qind++) {
             size_t q = ribfs_ab[qind];
+            double** Qar_qp = Qar[q]->pointer();
             for(size_t xind = 0; xind < naloc; xind++) {
                 size_t x = lmos_a[xind];
                 size_t qx = qind * naloc + xind;
+                if(riatom_to_lmosA_ext_dense[ribf_to_atom_[q]][x] == -1) throw PSIEXCEPTION("INDEX ERROR: ExchDisp Qar");
                 for(size_t rind = 0; rind < npao_a; rind++) {
-                    size_t r = lmoA_to_paosA_[a][rind];
-                    Qar_rect->set(qx, rind, Qar[q]->get(x, r));
+                    Qar_rectp[qx][rind] = Qar_qp[x][lmoA_to_paosA_[a][rind]];
                 }
             }
         }
@@ -4213,18 +4478,21 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 
         //timer_on("Transform Qar");
         Qar_rect = linalg::doublet(Qar_rect, XA_osv[a]);
+        Qar_rectp = Qar_rect->pointer();
         //timer_off("Transform Qar");
 
         //timer_on("Copy Qbs");
         auto Qbs_rect = std::make_shared<Matrix>("", naux_ab * nb, npao_b);
+        double** Qbs_rectp = Qbs_rect->pointer();
         for(size_t qind=0; qind < naux_ab; qind++) {
             size_t q = ribfs_ab[qind];
+            double** Qbs_qp = Qbs[q]->pointer();
             for(size_t yind = 0; yind < nbloc; yind++) {
                 size_t y = lmos_b[yind];
                 size_t qy = qind * nbloc + yind;
+                if(riatom_to_lmosB_ext_dense[ribf_to_atom_[q]][y] == -1) throw PSIEXCEPTION("INDEX ERROR: ExchDisp Qbs");
                 for(size_t sind = 0; sind < npao_b; sind++) {
-                    size_t s = lmoB_to_paosB_[b][sind];
-                    Qbs_rect->set(qy, sind, Qbs[q]->get(y, s));
+                    Qbs_rectp[qy][sind] = Qbs_qp[y][lmoB_to_paosB_[b][sind]];
                 }
             }
         }
@@ -4232,6 +4500,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 
         //timer_on("Transform Qbs");
         Qbs_rect = linalg::doublet(Qbs_rect, XB_osv[b]);
+        Qbs_rectp = Qbs_rect->pointer();
         //timer_off("Transform Qbs");
 
         //timer_on("Transform S/V");
@@ -4280,16 +4549,16 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
             for(size_t x = 0; x < naloc; x++) {
                 size_t qx = q * naloc + x;
                 for(size_t r = 0; r < nosv_a; r++) {
-                    rQa[r]->set(q, x, Qar_rect->get(qx, r));
-                    aQr[x]->set(q, r, Qar_rect->get(qx, r));
+                    rQa[r]->set(q, x, Qar_rectp[qx][r]);
+                    aQr[x]->set(q, r, Qar_rectp[qx][r]);
                 }
             }
 
             for(size_t y = 0; y < nbloc; y++) {
                 size_t qy = q * nbloc + y;
                 for(size_t s = 0; s < nosv_b; s++) {
-                    sQb[s]->set(q, y, Qbs_rect->get(q * nb + y, s));
-                    bQs[y]->set(q, s, Qbs_rect->get(qy, s));
+                    sQb[s]->set(q, y, Qbs_rectp[qy][s]);
+                    bQs[y]->set(q, s, Qbs_rectp[qy][s]);
                 }
             }
 
@@ -4301,7 +4570,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         for(size_t q = 0; q < naux_ab; q++) {
             for(size_t r = 0; r < nosv_a; r++) {
                 size_t qa = q * naloc + aloc;
-                Qar_a->set(q, r, Qar_rect->get(qa,r));
+                Qar_a->set(q, r, Qar_rectp[qa][r]);
             }
         }
 
@@ -4309,7 +4578,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         for(size_t q = 0; q < naux_ab; q++) {
             for(size_t s = 0; s < nosv_b; s++) {
                 size_t qb = q * nbloc + bloc;
-                Qbs_b->set(q, s, Qbs_rect->get(qb,s));
+                Qbs_b->set(q, s, Qbs_rectp[qb][s]);
             }
         }
 
@@ -4407,13 +4676,16 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         C_DGER_wrapper(vab_sr, S_as_a, tempv, 1.0);
         C_DGER_wrapper(vab_sr_comp, S_as_a, tempv, 1.0);
 
+        exchdisp_ab_comps[1][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        vab_sr_comp->zero();
+
         temp = linalg::doublet(Jxb_b, Qar_a, true, false); // na x nr
         temp->scale(2.0);
         temp->subtract(linalg::doublet(Jax_a, Qbr_b, true, false));
         vab_sr->add(linalg::doublet(S_as, temp, true, false));
         vab_sr_comp->add(linalg::doublet(S_as, temp, true, false));
         //timer_off("Part 2");
-        exchdisp_ab_comps[1][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        exchdisp_ab_comps[2][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
         vab_sr_comp->zero();
 
         // part 3
@@ -4426,13 +4698,16 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         C_DGER_wrapper(vab_sr, tempv, S_br_b, 1.0);
         C_DGER_wrapper(vab_sr_comp, tempv, S_br_b, 1.0);
 
+        exchdisp_ab_comps[3][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        vab_sr_comp->zero();
+
         temp = linalg::doublet(Jay_a, Qbs_b, true, false); // nb x ns
         temp->scale(2.0);
         temp->subtract(linalg::doublet(Jby_b, Qas_a, true, false));
         vab_sr->add(linalg::doublet(temp, S_br, true, false));
         vab_sr_comp->add(linalg::doublet(temp, S_br, true, false));
         //timer_off("Part 3");
-        exchdisp_ab_comps[2][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        exchdisp_ab_comps[4][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
         vab_sr_comp->zero();
 
         // part 4
@@ -4446,10 +4721,16 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         C_DGER_wrapper(vab_sr, tempv, S_br_b, +1.0);
         C_DGER_wrapper(vab_sr_comp, tempv, S_br_b, +1.0);
 
+        exchdisp_ab_comps[5][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        vab_sr_comp->zero();
+
         temp = linalg::triplet(S_ab, Jax_a, Qbs_b, true, true, false); // nb x ns
         temp->scale(-2.0);
         vab_sr->add(linalg::doublet(temp, S_br, true, false));
         vab_sr_comp->add(linalg::doublet(temp, S_br, true, false));
+
+        exchdisp_ab_comps[6][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        vab_sr_comp->zero();
 
         tempv = std::make_shared<Vector>("", nosv_b);
         for(size_t s = 0; s < nosv_b; s++) {
@@ -4459,12 +4740,16 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         C_DGER_wrapper(vab_sr, tempv, S_br_b, -2.0);
         C_DGER_wrapper(vab_sr_comp, tempv, S_br_b, -2.0);
 
+        exchdisp_ab_comps[7][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        vab_sr_comp->zero();
+
         tempv = C_DGEMV_wrapper(Qbs_b, Jx->get_column(0, 0), true);
         tempv2 = C_DGEMV_wrapper(S_br, S_ab_a, true);
         C_DGER_wrapper(vab_sr, tempv, tempv2, 4.0);
         C_DGER_wrapper(vab_sr_comp, tempv, tempv2, 4.0);
         //timer_off("Part 4");
-        exchdisp_ab_comps[3][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        //
+        exchdisp_ab_comps[8][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
         vab_sr_comp->zero();
 
         // part 5
@@ -4478,11 +4763,17 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         C_DGER_wrapper(vab_sr, S_as_a, tempv, +1.0);
         C_DGER_wrapper(vab_sr_comp, S_as_a, tempv, +1.0);
 
+        exchdisp_ab_comps[9][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        vab_sr_comp->zero();
+
         temp = linalg::triplet(Jar_a, Qby_b, S_ab, true, false, true); //(nr x naux) (naux x nb) (nb x na)
         temp = linalg::doublet(S_as, temp, true, true) ; // (ns x na) (na x nr)
         temp->scale(-2.0);
         vab_sr->add(temp);
         vab_sr_comp->add(temp);
+
+        exchdisp_ab_comps[10][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        vab_sr_comp->zero();
 
         tempv = std::make_shared<Vector>("", nosv_a);
         for(size_t r = 0; r < nosv_a; r++) {
@@ -4492,12 +4783,15 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         C_DGER_wrapper(vab_sr, S_as_a, tempv, -2.0);
         C_DGER_wrapper(vab_sr_comp, S_as_a, tempv, -2.0);
 
+        exchdisp_ab_comps[11][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        vab_sr_comp->zero();
+
         tempv = C_DGEMV_wrapper(Qar_a, Jy->get_column(0, 0), true);
         tempv2 = C_DGEMV_wrapper(S_as, S_ab_b, true);
         C_DGER_wrapper(vab_sr, tempv2, tempv, 4.0);
         C_DGER_wrapper(vab_sr_comp, tempv2, tempv, 4.0);
         //timer_off("Part 5");
-        exchdisp_ab_comps[4][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        exchdisp_ab_comps[12][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
         vab_sr_comp->zero();
 
         // part 6
@@ -4518,7 +4812,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         C_DGER_wrapper(vab_sr, S_as_a, tempv, -2.0);
         C_DGER_wrapper(vab_sr_comp, S_as_a, tempv, -2.0);
         //timer_off("Part 6");
-        exchdisp_ab_comps[5][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        exchdisp_ab_comps[13][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
         vab_sr_comp->zero();
 
         // part 7
@@ -4569,7 +4863,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         vab_sr->add(temp);
         vab_sr_comp->add(temp);
         //timer_off("Part 7");
-        exchdisp_ab_comps[6][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        exchdisp_ab_comps[14][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
         vab_sr_comp->zero();
 
         // part 8
@@ -4599,7 +4893,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         C_DGER_wrapper(vab_sr, tempv, S_br_b, +1.0);
         C_DGER_wrapper(vab_sr_comp, tempv, S_br_b, +1.0);
         //timer_off("Part 8");
-        exchdisp_ab_comps[7][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
+        exchdisp_ab_comps[15][ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr_comp->transpose());
         vab_sr_comp->zero();
 
         exchdisp_ab[ab] = -2.0 * t_abrs[ab]->vector_dot(vab_sr->transpose());
@@ -4613,7 +4907,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         e_exchdisp += exchdisp_ab[ab];
     }
 
-    for(int comp = 0; comp < 8; comp++) {
+    for(int comp = 0; comp < 16; comp++) {
         double e_exchdisp_comp = 0.0;
         for(size_t ab = 0; ab < npair; ab++) {
             e_exchdisp_comp += exchdisp_ab_comps[comp][ab];
@@ -4625,7 +4919,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
     timer_off("ExchDisp");
 
     outfile->Printf("  !! ExchDisp20: %.8f\n", e_exchdisp * pc_hartree2kcalmol);
-    outfile->Printf("  !! Dispersion: %.8f\n", (disp_tot + de_dipole_ + e_exchdisp) * pc_hartree2kcalmol);
+    outfile->Printf("  !! Dispersion: %.8f\n", (disp20_tot + e_exchdisp) * pc_hartree2kcalmol);
 
     return;
 
