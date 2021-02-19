@@ -3198,6 +3198,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
     double T_CUT_DO_PRE = 3e-2;
     double T_CUT_DO_ij = 1e-5;
     double T_CUT_PRE = 1e-5;
+    double T_CUT_MKN = 1e-3;
     double T_CUT_OSV = options_.get_double("T_CUT_OSV");
     double T_CUT_DO = options_.get_double("T_CUT_DO");
 
@@ -3650,7 +3651,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         // if non-zero mulliken pop on atom, include atom in the LMO's fitting domain
         for (size_t atom = 0; atom < natom; atom++) {
             //if (fabs(mkn_pop[a]) > options_.get_double("T_CUT_MKN")) {
-            if (fabs(mkn_pop[atom]) > 1e-3) {
+            if (fabs(mkn_pop[atom]) > T_CUT_MKN) {
                 lmoA_to_riatoms_[a].push_back(atom);
 
                 // each atom's aux orbitals are all-or-nothing for each LMO
@@ -3693,7 +3694,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         // if non-zero mulliken pop on atom, include atom in the LMO's fitting domain
         for (size_t atom = 0; atom < natom; atom++) {
             //if (fabs(mkn_pop[a]) > options_.get_double("T_CUT_MKN")) {
-            if (fabs(mkn_pop[atom]) > 1e-3) {
+            if (fabs(mkn_pop[atom]) > T_CUT_MKN) {
                 lmoB_to_riatoms_[b].push_back(atom);
 
                 // each atom's aux orbitals are all-or-nothing for each LMO
@@ -3873,13 +3874,11 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
     std::vector<std::vector<int>> lmoA_to_lmosA_inv_ = invert_map(lmoA_to_lmosA_, na);
     std::vector<std::vector<int>> lmoB_to_lmosB_inv_ = invert_map(lmoB_to_lmosB_, nb);
 
-    // TODO: chain maps should be restricted to only AB pairs, not A-> (FC)B or B->(FC)A (I think this is done)
-    // TODO: lmoA_to_riatoms should be null if a is non-interacting (I think this is also done)
-    //std::vector<std::vector<int>> lmoA_to_riatoms_ext1 = merge_maps(lmoA_to_riatoms_, chain_maps(intlmoA_to_intlmosB_, lmoB_to_riatoms_));
-    //std::vector<std::vector<int>> lmoB_to_riatoms_ext1 = merge_maps(lmoB_to_riatoms_, chain_maps(intlmoB_to_intlmosA_, lmoA_to_riatoms_));
+    // these maps are all we would need for (ov|K) domains
     std::vector<std::vector<int>> lmoA_to_riatoms_ext1 = merge_maps(intlmoA_to_riatoms_, chain_maps(intlmoA_to_intlmosB_, lmoB_to_riatoms_));
     std::vector<std::vector<int>> lmoB_to_riatoms_ext1 = merge_maps(intlmoB_to_riatoms_, chain_maps(intlmoB_to_intlmosA_, lmoA_to_riatoms_));
 
+    // these maps are necessary for the (oo|K) ints
     std::vector<std::vector<int>> lmoA_to_riatoms_ext = merge_maps(chain_maps(lmoA_to_lmosB_inv_, lmoB_to_riatoms_ext1),
                                                                    chain_maps(lmoA_to_lmosA_inv_, lmoA_to_riatoms_ext1));
     std::vector<std::vector<int>> lmoB_to_riatoms_ext = merge_maps(chain_maps(lmoB_to_lmosA_inv_, lmoA_to_riatoms_ext1),
@@ -3916,6 +3915,69 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         outfile->Printf("  !! RIATOM %d has %d / %d LMOSA and %d / %d LMOSB \n", atom, riatom_to_lmosA_ext[atom].size(), na, riatom_to_lmosB_ext[atom].size(), nb);
     } 
 
+
+
+    //std::vector<std::vector<int>> lmoA_to_paoatomsA_(na);
+
+    std::vector<std::vector<int>> paoatomA_to_riatoms_ext = chain_maps(invert_map(lmoA_to_paoatomsA_, natom), 
+                                                                        merge_maps(intlmoA_to_riatoms_, 
+                                                                                   chain_maps(intlmoA_to_intlmosB_, lmoB_to_riatoms_)));
+
+    std::vector<std::vector<int>> paoatomB_to_riatoms_ext = chain_maps(invert_map(lmoB_to_paoatomsB_, natom), 
+                                                                        merge_maps(intlmoB_to_riatoms_, 
+                                                                                   chain_maps(intlmoB_to_intlmosA_, lmoA_to_riatoms_)));
+
+
+    std::vector<std::vector<int>> riatom_to_paoatomsA_ext = invert_map(paoatomA_to_riatoms_ext, natom);
+    std::vector<std::vector<int>> riatom_to_paoatomsB_ext = invert_map(paoatomB_to_riatoms_ext, natom);
+    auto riatom_to_paosA_ext = chain_maps(riatom_to_paoatomsA_ext, atom_to_bf_);
+    auto riatom_to_paosB_ext = chain_maps(riatom_to_paoatomsB_ext, atom_to_bf_);
+
+    std::vector<std::vector<int>> riatom_to_paoatomsA_ext_dense(natom, std::vector<int>(natom, -1));
+    std::vector<std::vector<int>> riatom_to_paoatomsB_ext_dense(natom, std::vector<int>(natom, -1));
+
+    std::vector<std::vector<int>> riatom_to_paosA_ext_dense(natom, std::vector<int>(nbf, -1));
+    std::vector<std::vector<int>> riatom_to_paosB_ext_dense(natom, std::vector<int>(nbf, -1));
+
+    // TOD: make sparse_to_dense function
+
+    for(int riatom = 0; riatom < natom; riatom++) {
+
+        for(int paoatom_ind = 0; paoatom_ind < riatom_to_paoatomsA_ext[riatom].size(); paoatom_ind++) {
+            int paoatom = riatom_to_paoatomsA_ext[riatom][paoatom_ind];
+            riatom_to_paoatomsA_ext_dense[riatom][paoatom] = paoatom_ind;
+        }
+
+        for(int paoatom_ind = 0; paoatom_ind < riatom_to_paoatomsB_ext[riatom].size(); paoatom_ind++) {
+            int paoatom = riatom_to_paoatomsB_ext[riatom][paoatom_ind];
+            riatom_to_paoatomsB_ext_dense[riatom][paoatom] = paoatom_ind;
+        }
+
+
+        for(int pao_ind = 0; pao_ind < riatom_to_paosA_ext[riatom].size(); pao_ind++) {
+            int pao = riatom_to_paosA_ext[riatom][pao_ind];
+            riatom_to_paosA_ext_dense[riatom][pao] = pao_ind;
+        }
+
+        for(int pao_ind = 0; pao_ind < riatom_to_paosB_ext[riatom].size(); pao_ind++) {
+            int pao = riatom_to_paosB_ext[riatom][pao_ind];
+            riatom_to_paosB_ext_dense[riatom][pao] = pao_ind;
+        }
+
+    }
+
+
+    for(size_t atom = 0; atom < natom; atom++) {
+        outfile->Printf("  !! PAOATOM_A %d has %d / %d RIATOMS\n", atom, paoatomA_to_riatoms_ext[atom].size(), natom);
+    } 
+
+    for(size_t atom = 0; atom < natom; atom++) {
+        outfile->Printf("  !! PAOATOM_B %d has %d / %d RIATOMS\n", atom, paoatomB_to_riatoms_ext[atom].size(), natom);
+    } 
+
+    for(size_t atom = 0; atom < natom; atom++) {
+        outfile->Printf("  !! RIATOM %d has %d / %d PAOATOMS_A and %d / %d PAOATOMS_B \n", atom, riatom_to_paoatomsA_ext[atom].size(), natom, riatom_to_paoatomsB_ext[atom].size(), natom);
+    } 
 
 
     timer_off("LMO Sparsity");
@@ -3967,17 +4029,17 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
 //        for (int n_ind = 0; n_ind < bf_map2.size(); n_ind++) {
 //            bf_map2_inv[bf_map2[n_ind]] = n_ind;
 //        }
-//
+
+        auto CA_lmo_q = submatrix_cols(CA_lmo, riatom_to_lmosA_ext[centerQ]);
+        auto CB_lmo_q = submatrix_cols(CB_lmo, riatom_to_lmosB_ext[centerQ]);
+        auto CA_pao_q = submatrix_cols(CA_pao, riatom_to_paosA_ext[centerQ]);
+        auto CB_pao_q = submatrix_cols(CB_pao, riatom_to_paosB_ext[centerQ]);
+
+        std::vector<SharedMatrix> Qmn(nq);
+
         for (size_t q = 0; q < nq; q++) {
 //            qia[qstart + q] = std::make_shared<Matrix>("(mn|Q)", bf_map1.size(), bf_map2.size());
-            Qaa[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
-            Qbb[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
-            Qab[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
-
-            Qar[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
-            Qbs[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
-            Qas[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
-            Qbr[qstart + q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
+            Qmn[q] = std::make_shared<Matrix>("(mn|Q)", nbf, nbf);
         }
 
         for (int M = 0; M < primary_->nshell(); M++) {
@@ -3986,7 +4048,7 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
             int mstart = primary_->shell(M).function_index();
             int centerM = primary_->shell_to_center(M);
 
-            for (int N = 0; N < primary_->nshell(); N++) {
+            for (int N = M; N < primary_->nshell(); N++) {
                 int nn = primary_->shell(N).nfunction();
 //            for (int N : riatom_to_shells2[centerQ]) {
                 int nstart = primary_->shell(N).function_index();
@@ -4003,17 +4065,12 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
                 const double* buffer = eris[thread]->buffer();
 
                 for (int q = 0, index = 0; q < nq; q++) {
+                    double** Qmn_qp = Qmn[q]->pointer();
                     for (int m = 0; m < nm; m++) {
                         for (int n = 0; n < nn; n++, index++) {
 //                            qia[qstart + q]->set(bf_map1_inv[mstart + m], bf_map2_inv[nstart + n], buffer[index]);
-                            Qaa[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
-                            Qbb[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
-                            Qab[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
-
-                            Qar[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
-                            Qbs[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
-                            Qas[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
-                            Qbr[qstart + q]->set(mstart + m, nstart + n, buffer[index]);
+                            Qmn_qp[mstart + m][nstart + n] = buffer[index];
+                            if (M != N) Qmn_qp[nstart + n][mstart + m] = buffer[index];
                         }
                     }
                 }
@@ -4048,14 +4105,37 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         // (mn|Q) C_mi C_nu -> (iu|Q)
         for (size_t q = 0; q < nq; q++) {
 //            qia[qstart + q] = linalg::triplet(C_lmo_slice, qia[qstart + q], C_pao_slice, true, false, false);
-            Qaa[qstart + q] = linalg::triplet(CA_lmo, Qaa[qstart + q], CA_lmo, true, false, false);
-            Qbb[qstart + q] = linalg::triplet(CB_lmo, Qbb[qstart + q], CB_lmo, true, false, false);
-            Qab[qstart + q] = linalg::triplet(CA_lmo, Qab[qstart + q], CB_lmo, true, false, false);
 
-            Qar[qstart + q] = linalg::triplet(CA_lmo, Qar[qstart + q], CA_pao, true, false, false);
-            Qbs[qstart + q] = linalg::triplet(CB_lmo, Qbs[qstart + q], CB_pao, true, false, false);
-            Qas[qstart + q] = linalg::triplet(CA_lmo, Qas[qstart + q], CB_pao, true, false, false);
-            Qbr[qstart + q] = linalg::triplet(CB_lmo, Qbr[qstart + q], CA_pao, true, false, false);
+            //Qaa[qstart + q] = linalg::triplet(CA_lmo_q, Qaa[qstart + q], CA_lmo_q, true, false, false);
+            //Qbb[qstart + q] = linalg::triplet(CB_lmo_q, Qbb[qstart + q], CB_lmo_q, true, false, false);
+            //Qab[qstart + q] = linalg::triplet(CA_lmo_q, Qab[qstart + q], CB_lmo_q, true, false, false);
+
+            //Qar[qstart + q] = linalg::triplet(CA_lmo_q, Qar[qstart + q], CA_pao, true, false, false);
+            //Qbs[qstart + q] = linalg::triplet(CB_lmo_q, Qbs[qstart + q], CB_pao, true, false, false);
+            //Qas[qstart + q] = linalg::triplet(CA_lmo_q, Qas[qstart + q], CB_pao, true, false, false);
+            //Qbr[qstart + q] = linalg::triplet(CB_lmo_q, Qbr[qstart + q], CA_pao, true, false, false);
+            
+            //Qaa[qstart + q] = linalg::triplet(CA_lmo_q, Qmn[q], CA_lmo_q, true, false, false);
+            //Qbb[qstart + q] = linalg::triplet(CB_lmo_q, Qmn[q], CB_lmo_q, true, false, false);
+            //Qab[qstart + q] = linalg::triplet(CA_lmo_q, Qmn[q], CB_lmo_q, true, false, false);
+
+            //Qar[qstart + q] = linalg::triplet(CA_lmo_q, Qmn[q], CA_pao, true, false, false);
+            //Qbs[qstart + q] = linalg::triplet(CB_lmo_q, Qmn[q], CB_pao, true, false, false);
+            //Qas[qstart + q] = linalg::triplet(CA_lmo_q, Qmn[q], CB_pao, true, false, false);
+            //Qbr[qstart + q] = linalg::triplet(CB_lmo_q, Qmn[q], CA_pao, true, false, false);
+
+            auto Qan_q = linalg::doublet(CA_lmo_q, Qmn[q], true, false);
+            auto Qbn_q = linalg::doublet(CB_lmo_q, Qmn[q], true, false);
+
+            Qaa[qstart + q] = linalg::doublet(Qan_q, CA_lmo_q, false, false);
+            Qbb[qstart + q] = linalg::doublet(Qbn_q, CB_lmo_q, false, false);
+            Qab[qstart + q] = linalg::doublet(Qan_q, CB_lmo_q, false, false);
+
+            Qar[qstart + q] = linalg::doublet(Qan_q, CA_pao_q, false, false);
+            Qbs[qstart + q] = linalg::doublet(Qbn_q, CB_pao_q, false, false);
+            Qas[qstart + q] = linalg::doublet(Qan_q, CB_pao_q, false, false);
+            Qbr[qstart + q] = linalg::doublet(Qbn_q, CA_pao_q, false, false);
+
         }
 
     }  // Q loop
@@ -4102,10 +4182,14 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         auto Qar_a = std::make_shared<Matrix>("(ar|Q)_a", naux_a, npao_dep_a);
         for(size_t qind = 0; qind < naux_a; qind++) {
             size_t q = ribfs_a[qind];
-            if(riatom_to_lmosA_ext_dense[ribf_to_atom_[q]][a] == -1) throw PSIEXCEPTION("INDEX ERROR: OSVs A");
+            int a_q = riatom_to_lmosA_ext_dense[ribf_to_atom_[q]][a];
+            if(a_q == -1) throw PSIEXCEPTION("INDEX ERROR: OSVs A");
             for(size_t rind = 0; rind < npao_dep_a; rind++) {
                 size_t r = lmoA_to_paosA_[a][rind];
-                Qar_a->set(qind, rind, Qar[q]->get(a, r));
+                //int r_q = riatom_to_paoatomsA_ext_dense[ribf_to_atom_[q]][bf_to_atom_[r]];
+                int r_q = riatom_to_paosA_ext_dense[ribf_to_atom_[q]][r];
+                if(r_q == -1) throw PSIEXCEPTION("Sparsity Error: OSVs Qar");
+                Qar_a->set(qind, rind, Qar[q]->get(a_q, r_q));
             }
         }
         Qar_a = linalg::doublet(Qar_a, XA_can[a]); // (naux x npao_pre_a) (npao_pre_a x npao_a)
@@ -4187,10 +4271,14 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         auto Qbs_b = std::make_shared<Matrix>("(bs|Q)_b", naux_b, npao_dep_b);
         for(size_t qind = 0; qind < naux_b; qind++) {
             size_t q = ribfs_b[qind];
-            if(riatom_to_lmosB_ext_dense[ribf_to_atom_[q]][b] == -1) throw PSIEXCEPTION("INDEX ERROR: OSVs B");
+            int b_q = riatom_to_lmosB_ext_dense[ribf_to_atom_[q]][b];
+            if(b_q == -1) throw PSIEXCEPTION("INDEX ERROR: OSVs B");
             for(size_t sind = 0; sind < npao_dep_b; sind++) {
                 size_t s = lmoB_to_paosB_[b][sind];
-                Qbs_b->set(qind, sind, Qbs[q]->get(b, s));
+                //int s_q = riatom_to_paoatomsB_ext_dense[ribf_to_atom_[q]][bf_to_atom_[s]];
+                int s_q = riatom_to_paosB_ext_dense[ribf_to_atom_[q]][s];
+                if(s_q == -1) throw PSIEXCEPTION("Sparsity Error: OSVs Qbs");
+                Qbs_b->set(qind, sind, Qbs[q]->get(b_q, s_q));
             }
         }
         Qbs_b = linalg::doublet(Qbs_b, XB_can[b]); // (naux x npao_pre_a) (npao_pre_a x npao_b)
@@ -4306,10 +4394,13 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         auto Qar_a = std::make_shared<Matrix>("(ar|Q)_a", naux_ab, npao_a);
         for(size_t qind = 0; qind < naux_ab; qind++) {
             size_t q = ribfs_ab[qind];
-            if(riatom_to_lmosA_ext_dense[ribf_to_atom_[q]][a] == -1) throw PSIEXCEPTION("INDEX ERROR: Pre-Iterations A");
+            int a_q = riatom_to_lmosA_ext_dense[ribf_to_atom_[q]][a];
+            if(a_q == -1) throw PSIEXCEPTION("INDEX ERROR: Pre-Iterations A");
             for(size_t rind = 0; rind < npao_a; rind++) {
                 size_t r = lmoA_to_paosA_[a][rind];
-                Qar_a->set(qind, rind, Qar[q]->get(a,r));
+                int r_q = riatom_to_paosA_ext_dense[ribf_to_atom_[q]][r];
+                if(r_q == -1) throw PSIEXCEPTION("Sparsity Error: Pre-Iterations Qar");
+                Qar_a->set(qind, rind, Qar[q]->get(a_q, r_q));
             }
         }
         auto Qar_a_full = linalg::doublet(Qar_a, XA_can[a], false, false);
@@ -4318,10 +4409,13 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         auto Qbs_b = std::make_shared<Matrix>("(bs|Q)_b", naux_ab, npao_b);
         for(size_t qind = 0; qind < naux_ab; qind++) {
             size_t q = ribfs_ab[qind];
-            if(riatom_to_lmosB_ext_dense[ribf_to_atom_[q]][b] == -1) throw PSIEXCEPTION("INDEX ERROR: Pre-Iterations B");
+            int b_q = riatom_to_lmosB_ext_dense[ribf_to_atom_[q]][b];
+            if(b_q == -1) throw PSIEXCEPTION("INDEX ERROR: Pre-Iterations B");
             for(size_t sind = 0; sind < npao_b; sind++) {
                 size_t s = lmoB_to_paosB_[b][sind];
-                Qbs_b->set(qind, sind, Qbs[q]->get(b,s));
+                int s_q = riatom_to_paosB_ext_dense[ribf_to_atom_[q]][s];
+                if(s_q == -1) throw PSIEXCEPTION("Sparsity Error: Pre-Iterations Qbs");
+                Qbs_b->set(qind, sind, Qbs[q]->get(b_q, s_q));
             }
         }
         auto Qbs_b_full = linalg::doublet(Qbs_b, XB_can[b], false, false);
@@ -4421,6 +4515,8 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         std::tie(a, b) = ab_to_a_b[ab];
 
         // local stuff
+        auto paos_a = lmoA_to_paosA_[a];
+        auto paos_b = lmoB_to_paosB_[b];
         auto riatoms_ab = merge_lists(lmoA_to_riatoms_[a], lmoB_to_riatoms_[b]);
         auto ribfs_ab = merge_lists(lmoA_to_ribfs_[a], lmoB_to_ribfs_[b]);
         //auto lmos_a = lmoB_to_lmosA_[b]; //merge_lists(lmoA_to_lmosA_[a], lmoB_to_lmosA_[b]);
@@ -4464,13 +4560,17 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         double** Qar_rectp = Qar_rect->pointer();
         for(size_t qind=0; qind < naux_ab; qind++) {
             size_t q = ribfs_ab[qind];
+            int riatom = ribf_to_atom_[q];
             double** Qar_qp = Qar[q]->pointer();
             for(size_t xind = 0; xind < naloc; xind++) {
                 size_t x = lmos_a[xind];
                 size_t qx = qind * naloc + xind;
-                if(riatom_to_lmosA_ext_dense[ribf_to_atom_[q]][x] == -1) throw PSIEXCEPTION("INDEX ERROR: ExchDisp Qar");
+                int x_q = riatom_to_lmosA_ext_dense[ribf_to_atom_[q]][x];
+                if(x_q == -1) throw PSIEXCEPTION("INDEX ERROR: ExchDisp Qar");
                 for(size_t rind = 0; rind < npao_a; rind++) {
-                    Qar_rectp[qx][rind] = Qar_qp[x][lmoA_to_paosA_[a][rind]];
+                    int r_q = riatom_to_paosA_ext_dense[riatom][paos_a[rind]];
+                    if(r_q == -1) throw PSIEXCEPTION("Sparsity Error: ExchDisp Qar");
+                    Qar_rectp[qx][rind] = Qar_qp[x_q][r_q];
                 }
             }
         }
@@ -4486,13 +4586,19 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         double** Qbs_rectp = Qbs_rect->pointer();
         for(size_t qind=0; qind < naux_ab; qind++) {
             size_t q = ribfs_ab[qind];
+            int riatom = ribf_to_atom_[q];
             double** Qbs_qp = Qbs[q]->pointer();
             for(size_t yind = 0; yind < nbloc; yind++) {
                 size_t y = lmos_b[yind];
                 size_t qy = qind * nbloc + yind;
-                if(riatom_to_lmosB_ext_dense[ribf_to_atom_[q]][y] == -1) throw PSIEXCEPTION("INDEX ERROR: ExchDisp Qbs");
+                int y_q = riatom_to_lmosB_ext_dense[ribf_to_atom_[q]][y];
+                if(y_q == -1) throw PSIEXCEPTION("INDEX ERROR: ExchDisp Qbs");
                 for(size_t sind = 0; sind < npao_b; sind++) {
-                    Qbs_rectp[qy][sind] = Qbs_qp[y][lmoB_to_paosB_[b][sind]];
+                    //int s = lmoB_to_paosB_[b][sind];
+                    //int s_q = riatom_to_paosB_ext_dense[ribf_to_atom_[q]][s];
+                    int s_q = riatom_to_paosB_ext_dense[riatom][paos_b[sind]];
+                    if(s_q == -1) throw PSIEXCEPTION("Sparsity Error: ExchDisp Qbs");
+                    Qbs_rectp[qy][sind] = Qbs_qp[y_q][s_q];
                 }
             }
         }
@@ -4594,26 +4700,34 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
         for(size_t qind = 0; qind < naux_ab; qind++) {
 
             size_t q = ribfs_ab[qind];
+            int a_q = riatom_to_lmosA_ext_dense[ribf_to_atom_[q]][a];
+            int b_q = riatom_to_lmosB_ext_dense[ribf_to_atom_[q]][b];
 
             for(size_t xind = 0; xind < naloc; xind++) {
                 size_t x = lmos_a[xind];
-                Qax_a->set(qind, xind, Qaa[q]->get(a,x));
-                Qxb_b->set(qind, xind, Qab[q]->get(x,b));
-                Qxx->set(qind, xind, Qaa[q]->get(x,x));
+                int x_q = riatom_to_lmosA_ext_dense[ribf_to_atom_[q]][x];
+                Qax_a->set(qind, xind, Qaa[q]->get(a_q,x_q));
+                Qxb_b->set(qind, xind, Qab[q]->get(x_q,b_q));
+                Qxx->set(qind, xind, Qaa[q]->get(x_q,x_q));
             }
             for(size_t yind = 0; yind < nbloc; yind++) {
                 size_t y = lmos_b[yind];
-                Qay_a->set(qind, yind, Qab[q]->get(a,y));
-                Qby_b->set(qind, yind, Qbb[q]->get(b,y));
-                Qyy->set(qind, yind, Qbb[q]->get(y,y));
+                int y_q = riatom_to_lmosB_ext_dense[ribf_to_atom_[q]][y];
+                Qay_a->set(qind, yind, Qab[q]->get(a_q,y_q));
+                Qby_b->set(qind, yind, Qbb[q]->get(b_q,y_q));
+                Qyy->set(qind, yind, Qbb[q]->get(y_q,y_q));
             }
             for(size_t sind = 0; sind < npao_b; sind++) {
                 size_t s = lmoB_to_paosB_[b][sind];
-                Qas_a->set(qind, sind, Qas[q]->get(a,s));
+                int s_q = riatom_to_paosB_ext_dense[ribf_to_atom_[q]][s];
+                if(s_q == -1) throw PSIEXCEPTION("Sparsity Error: Qas");
+                Qas_a->set(qind, sind, Qas[q]->get(a_q, s_q));
             }
             for(size_t rind = 0; rind < npao_a; rind++) {
                 size_t r = lmoA_to_paosA_[a][rind];
-                Qbr_b->set(qind, rind, Qbr[q]->get(b,r));
+                int r_q = riatom_to_paosA_ext_dense[ribf_to_atom_[q]][r];
+                if(r_q == -1) throw PSIEXCEPTION("Sparsity Error: Qbr");
+                Qbr_b->set(qind, rind, Qbr[q]->get(b_q, r_q));
             }
         }
 
@@ -4921,18 +5035,9 @@ void FISAPT::local_disp(std::map<std::string, SharedMatrix> matrix_cache, std::m
     outfile->Printf("  !! ExchDisp20: %.8f\n", e_exchdisp * pc_hartree2kcalmol);
     outfile->Printf("  !! Dispersion: %.8f\n", (disp20_tot + e_exchdisp) * pc_hartree2kcalmol);
 
-    return;
-
-    double Disp20 = 0.0;
-    double ExchDisp20 = 0.0;
-
-    scalars_["Disp20"] = Disp20;
-    scalars_["Exch-Disp20"] = ExchDisp20;
-    if (do_print) {
-        outfile->Printf("    Disp20              = %18.12lf [Eh]\n", Disp20);
-        outfile->Printf("    Exch-Disp20         = %18.12lf [Eh]\n", ExchDisp20);
-        outfile->Printf("\n");
-    }
+    scalars_["Local-Dispersion"] = disp20_tot + e_exchdisp;
+    scalars_["Local-Disp20"] = disp20_tot;
+    scalars_["Local-Exch-Disp20"] = e_exchdisp;
 }
 
 void FISAPT::print_trailer() {
@@ -5037,6 +5142,10 @@ void FISAPT::print_trailer() {
     Process::environment.globals["SAPT DISP ENERGY"] = scalars_["Dispersion"];
     Process::environment.globals["SAPT DISP20 ENERGY"] = scalars_["Disp20"];
     Process::environment.globals["SAPT EXCH-DISP20 ENERGY"] = scalars_["Exch-Disp20"];
+
+    Process::environment.globals["SAPT LOCAL DISP ENERGY"] = scalars_["Local-Dispersion"];
+    Process::environment.globals["SAPT LOCAL DISP20 ENERGY"] = scalars_["Local-Disp20"];
+    Process::environment.globals["SAPT LOCAL EXCH-DISP20 ENERGY"] = scalars_["Local-Exch-Disp20"];
 
     Process::environment.globals["SAPT0 TOTAL ENERGY"] = scalars_["SAPT"];
     Process::environment.globals["SAPT TOTAL ENERGY"] = scalars_["SAPT"];
